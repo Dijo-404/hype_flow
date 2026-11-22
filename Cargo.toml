@@ -1,0 +1,52 @@
+[workspace]
+members = ["worker"]
+resolver = "3"
+
+[package]
+name = "hype-flow"
+version = "0.1.0"
+edition = "2024"
+description = "Native offline dictation for niri"
+default-run = "hype-flow"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:gtk", "dep:gtk4-layer-shell", "dep:async-channel", "dep:signal-hook"]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+regex = "1"
+fancy-regex = "0.16"
+unicode-casefold = "0.2"
+unicode-normalization = "0.1"
+libc = "0.2"
+tempfile = "3"
+hound = "3.5"
+sha2 = "0.10"
+tar = "0.4"
+bzip2 = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"], optional = true }
+gtk4-layer-shell = { version = "=0.8.1", optional = true }
+async-channel = { version = "2", optional = true }
+signal-hook = { version = "0.3", optional = true }
+
+[[bin]]
+name = "hype-flow"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "hype-flow-evaluate"
+path = "src/bin/evaluate.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+debug = 0

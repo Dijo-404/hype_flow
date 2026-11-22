@@ -8,11 +8,11 @@ Reference checkout: `007826d936af15e89291c1106042f1b280a75933`.
 
 The selected model, pinned sherpa-onnx version, and four required model files follow `src/models/modelRegistryData.json`, `src/helpers/parakeetModelInfo.js`, and `scripts/download-sherpa-onnx.js`. The CPU runtime is version **1.13.8**, using the upstream `shared-no-tts` archive, as in the reference.
 
-`src/dictation/segments.py` ports `src/helpers/parakeetSegmentation.js` to PCM16. It moves 15-second chunk boundaries toward pauses without dropping, duplicating, or reordering samples, and absorbs tails up to 0.5 seconds. The native SDK handles inference; Hype Flow's small C worker keeps the model loaded and exchanges PCM and results over anonymous pipes. It opens no HTTP or WebSocket server.
+`src/dictation/segments.py` ports `src/helpers/parakeetSegmentation.js` to PCM16. It moves 15-second chunk boundaries toward pauses without dropping, duplicating, or reordering samples, and absorbs tails up to 0.5 seconds. The native SDK handles inference; Hype Flow's Rust worker keeps the model loaded and exchanges PCM and results over anonymous pipes. It opens no HTTP or WebSocket server.
 
 The reference disables hotword boosting for Parakeet Unified because its benefit has not been validated and high scores damaged recognition (`src/utils/sherpaHotwords.js`). Hype Flow exposes it at the user's request, using the [documented transducer hotword path](https://k2-fsa.github.io/sherpa/onnx/hotwords/index.html): `modified_beam_search`, four active paths, BPE encoding, and a bounded score of 0.5–3.0 (default 1.5). An empty list or disabled boost keeps greedy decoding. This is native decoder biasing, not a guarantee that Unified recognizes a listed term more accurately.
 
-Text cleanup is local, literal Python processing: configured corrections, vocabulary capitalization, explicit word filters, and optional adjacent repeated-word removal. It adds no model or spelling dependency. Corrections and default filler filtering are enabled; repeated-word removal is disabled. The original pre-cleanup result remains separately recoverable.
+Text cleanup is local Rust processing, ported from the retained Python reference: configured corrections, vocabulary capitalization, explicit word filters, and optional adjacent repeated-word removal. It adds no model or spelling dependency. Corrections and default filler filtering are enabled; repeated-word removal is disabled. The original pre-cleanup result remains separately recoverable.
 
 The settings window adapts `src/index.css`, `ControlPanelSidebar.tsx`, and `ui/SettingsSection.tsx`: sidebar navigation, charcoal surfaces, blue accents, and compact panels. It uses installed Noto Sans rather than the proprietary brand fonts.
 
@@ -41,7 +41,7 @@ Upstream: [sherpa-onnx v1.13.8](https://github.com/k2-fsa/sherpa-onnx/releases/t
 - Archive: `sherpa-onnx-v1.13.8-linux-x64-shared-no-tts.tar.bz2`.
 - SHA-256: `d0f96c8b65c6cd0974fada22737e337de81bc8cd2abbec2e39caf358b1eec5fc`.
 - Only native libraries and the C header are installed; the bundled command-line programs are not copied.
-- The helper is compiled locally against the pinned C header. No Python model framework, Torch, CUDA toolkit, or WebSocket dependency is needed.
+- The Rust worker uses checked-in dynamic API bindings generated from the pinned C header. First-use setup stages the shipped worker; it does not compile C. No Python model framework, Torch, CUDA toolkit, or WebSocket dependency is needed.
 
 Sherpa-onnx's Apache 2.0 license: [licenses/sherpa_onnx.txt](licenses/sherpa_onnx.txt). ONNX Runtime's MIT notice is retained at [licenses/onnxruntime.txt](licenses/onnxruntime.txt), from its [upstream license](https://github.com/microsoft/onnxruntime/blob/main/LICENSE).
 
@@ -50,3 +50,34 @@ Sherpa-onnx's Apache 2.0 license: [licenses/sherpa_onnx.txt](licenses/sherpa_onn
 Handy reference checkout: `4807c21a7bb9a3bf2d52578a9b541e165b6bc8b9`. The overlay follows `src-tauri/src/overlay.rs`: a layer-shell surface without keyboard focus or an exclusive zone. Handy's MIT license: [licenses/handy.txt](licenses/handy.txt).
 
 The initial prototype used OpenWhispr's whisper.cpp release `0.0.11` with full large-v3 weights. Parakeet replaces that runtime as the default. Existing model downloads are left intact, and previous default config paths migrate in memory while custom paths and preferences are preserved. The earlier whisper.cpp MIT notice is retained at [licenses/whisper_cpp.txt](licenses/whisper_cpp.txt).
+
+## Rust application migration
+
+The application and its speech worker have been ported to Rust, with GTK4 for
+the desktop interface. `Cargo.lock` records the
+exact Rust dependency versions. GTK4 and GTK4 layer-shell replace the prior
+GTK3 bindings; model and inference-runtime provenance above remains unchanged.
+The application-owned C worker remains the phase-1 compatibility and rollback
+reference. The second phase replaced that wrapper while retaining the pinned
+sherpa-onnx API and ONNX Runtime native libraries. Verification and measured
+limits are recorded in [migration-results.md](migration-results.md).
+
+Clipboard sensitivity uses `wl-copy --sensitive` from wl-clipboard 2.3 or
+later. Existing model notices and reference-project credits remain applicable.
+
+### Reproducing the worker bindings
+
+The C API header SHA-256 is
+`2a1b95084be8fd1deb3228fcad2fd3f7f0258b64582f7402281ec174c7b7f4ce`.
+All 33 concrete generated struct sizes/alignments and 155 field offsets were
+compared independently to a C compiler using this header. Normal builds use
+the checked-in bindings and require neither a generator nor installed model files.
+
+```sh
+cargo install bindgen-cli --version 0.72.1 --locked
+sh tools/generate-worker-bindings.sh /path/to/sherpa-onnx/c-api/c-api.h
+```
+
+The script verifies the header digest, derives the 21-function allowlist from
+the preserved C reference, and supplies the complete bindgen command.
+Regeneration was verified byte-for-byte against the checked-in output.

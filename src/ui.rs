@@ -1,0 +1,1011 @@
+use crate::{audio, config::Config, setup};
+use gtk::{gdk, glib, prelude::*};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+
+pub const PAGES: [(&str, &str, &str); 5] = [
+    ("general", "General", "preferences-system-symbolic"),
+    ("model", "Speech model", "computer-symbolic"),
+    (
+        "vocabulary",
+        "Vocabulary",
+        "accessories-dictionary-symbolic",
+    ),
+    ("cleanup", "Text cleanup", "edit-clear-symbolic"),
+    ("shortcuts", "Shortcuts", "input-keyboard-symbolic"),
+];
+
+#[derive(Clone)]
+pub enum Control {
+    Switch(gtk::Switch),
+    Entry(gtk::Entry),
+    Text(gtk::TextBuffer),
+    Number(gtk::SpinButton),
+    Choice(gtk::DropDown, Vec<String>),
+}
+
+impl Control {
+    fn value(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Self::Switch(widget) => json!(widget.is_active()),
+            Self::Entry(widget) => json!(widget.text().as_str()),
+            Self::Text(buffer) => json!(
+                buffer
+                    .text(&buffer.start_iter(), &buffer.end_iter(), true)
+                    .as_str()
+            ),
+            Self::Number(widget) => json!(widget.value()),
+            Self::Choice(widget, values) => json!(
+                values
+                    .get(widget.selected() as usize)
+                    .cloned()
+                    .unwrap_or_default()
+            ),
+        }
+    }
+
+    fn connect_changed(&self, changed: Rc<dyn Fn()>) {
+        match self {
+            Self::Switch(widget) => {
+                widget.connect_active_notify(move |_| changed());
+            }
+            Self::Entry(widget) => {
+                widget.connect_changed(move |_| changed());
+            }
+            Self::Text(buffer) => {
+                buffer.connect_changed(move |_| changed());
+            }
+            Self::Number(widget) => {
+                widget.connect_value_changed(move |_| changed());
+            }
+            Self::Choice(widget, _) => {
+                widget.connect_selected_notify(move |_| changed());
+            }
+        }
+    }
+}
+
+pub struct Home {
+    pub window: gtk::ApplicationWindow,
+    pub stack: gtk::Stack,
+    pub navigation: gtk::ListBox,
+    pub controls: Vec<(String, Control)>,
+    pub save_button: gtk::Button,
+    pub status: gtk::Label,
+    pub badge: gtk::Label,
+    pub download_button: gtk::Button,
+    values: RefCell<Config>,
+    model_status: gtk::Label,
+    status_dot: gtk::Box,
+    sidebar: gtk::Box,
+    navigation_labels: Vec<gtk::Label>,
+    rows: Vec<(gtk::Box, gtk::Widget)>,
+    compact: Cell<bool>,
+    title: gtk::Label,
+}
+
+fn label(text: &str, class: &str) -> gtk::Label {
+    let widget = gtk::Label::builder()
+        .label(text)
+        .xalign(0.0)
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .max_width_chars(60)
+        .build();
+    if !class.is_empty() {
+        widget.add_css_class(class);
+    }
+    widget
+}
+
+fn section(page: &gtk::Box, title: &str) -> gtk::Box {
+    let heading = label(title, "section-title");
+    page.append(&heading);
+    let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    group.add_css_class("settings-panel");
+    page.append(&group);
+    group
+}
+
+fn row(group: &gtk::Box, title: &str, detail: &str, control: &impl IsA<gtk::Widget>) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 14);
+    row.add_css_class("setting-row");
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 3);
+    text.set_hexpand(true);
+    text.append(&label(title, "row-title"));
+    if !detail.is_empty() {
+        text.append(&label(detail, "muted"));
+    }
+    row.append(&text);
+    control.set_valign(gtk::Align::Center);
+    control.set_halign(gtk::Align::End);
+    control
+        .as_ref()
+        .update_property(&[gtk::accessible::Property::Label(title)]);
+    row.append(control);
+    group.append(&row);
+    row
+}
+
+impl Home {
+    pub fn new(
+        app: &gtk::Application,
+        values: &Config,
+        action: Rc<dyn Fn(&str)>,
+        save: Rc<dyn Fn(Config) -> bool>,
+    ) -> Rc<Self> {
+        let css = gtk::CssProvider::new();
+        // GTK4 removed this GTK3-only property; preserve all other existing styling.
+        css.load_from_string(
+            &include_str!("../assets/settings.css").replace("-gtk-outline-radius: 6px;", ""),
+        );
+        if let Some(display) = gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+        let window = gtk::ApplicationWindow::builder()
+            .application(app)
+            .title("Hype Flow")
+            .default_width(960)
+            .default_height(680)
+            .hide_on_close(true)
+            .decorated(false)
+            .build();
+        window.set_size_request(620, 480);
+        window.set_widget_name("hype-settings");
+        let shell = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        sidebar.set_widget_name("settings-sidebar");
+        sidebar.set_size_request(200, -1);
+        shell.append(&sidebar);
+        let lights = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        lights.add_css_class("traffic-lights");
+        for (name, glyph, description) in [
+            ("close", "×", "Close window (Ctrl+W)"),
+            ("zoom", "+", "Zoom"),
+        ] {
+            let button = gtk::Button::with_label(glyph);
+            button.add_css_class("traffic");
+            button.add_css_class(name);
+            button.set_tooltip_text(Some(description));
+            button.set_focusable(false);
+            button.update_property(&[gtk::accessible::Property::Label(description)]);
+            let window = window.downgrade();
+            button.connect_clicked(move |_| {
+                if let Some(window) = window.upgrade() {
+                    if name == "close" {
+                        window.set_visible(false);
+                    } else if window.is_maximized() {
+                        window.unmaximize();
+                    } else {
+                        window.maximize();
+                    }
+                }
+            });
+            lights.append(&button);
+        }
+        let handle = gtk::WindowHandle::new();
+        handle.set_child(Some(&lights));
+        sidebar.append(&handle);
+        let brand = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        brand.add_css_class("brand");
+        let bytes = glib::Bytes::from_static(include_bytes!("../assets/logo.svg"));
+        let icon = gdk::Texture::from_bytes(&bytes).ok();
+        let image = gtk::Image::from_paintable(icon.as_ref());
+        image.set_pixel_size(30);
+        brand.append(&image);
+        let brand_name = label("Hype Flow", "brand-name");
+        brand.append(&brand_name);
+        sidebar.append(&brand);
+        let navigation = gtk::ListBox::new();
+        navigation.set_widget_name("settings-navigation");
+        navigation.set_selection_mode(gtk::SelectionMode::Single);
+        sidebar.append(&navigation);
+        let mut navigation_labels = vec![brand_name];
+        for (index, (_, title, icon)) in PAGES.iter().enumerate() {
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 9);
+            let image = gtk::Image::from_icon_name(icon);
+            image.add_css_class("tile");
+            image.add_css_class(["gray", "blue", "orange", "green", "indigo"][index]);
+            content.append(&image);
+            let text = label(title, "");
+            navigation_labels.push(text.clone());
+            content.append(&text);
+            let item = gtk::ListBoxRow::new();
+            item.set_tooltip_text(Some(title));
+            item.set_child(Some(&content));
+            navigation.append(&item);
+        }
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        content.set_widget_name("settings-content");
+        content.set_hexpand(true);
+        shell.append(&content);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        header.add_css_class("page-header");
+        let title = label("General", "page-title");
+        title.set_hexpand(true);
+        header.append(&title);
+        let status_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        status_dot.add_css_class("status-dot");
+        status_dot.add_css_class("busy");
+        status_dot.set_valign(gtk::Align::Center);
+        header.append(&status_dot);
+        let badge = label("On-device", "status-badge");
+        header.append(&badge);
+        content.append(&header);
+        let stack = gtk::Stack::builder()
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .transition_duration(220)
+            .vexpand(true)
+            .build();
+        content.append(&stack);
+        let pages: Vec<gtk::Box> = PAGES
+            .iter()
+            .map(|(name, _, _)| {
+                let page = gtk::Box::new(gtk::Orientation::Vertical, 10);
+                page.add_css_class("settings-page");
+                let scroll = gtk::ScrolledWindow::builder()
+                    .hscrollbar_policy(gtk::PolicyType::Never)
+                    .child(&page)
+                    .build();
+                stack.add_named(&scroll, Some(name));
+                page
+            })
+            .collect();
+        let mut controls = Vec::new();
+        let mut rows = Vec::new();
+        let dictation = section(&pages[0], "Dictation");
+        let microphones = section(&pages[0], "Microphone");
+        let feedback = section(&pages[0], "Feedback");
+        let transcription = section(&pages[1], "Transcription");
+        transcription.append(&label("Parakeet Unified English", "model-title"));
+        transcription.append(&label("INT8 · 663 MB model files · English with punctuation and capitalization. Audio stays on this device.", "muted"));
+        let model_status = label("Checking model…", "muted");
+        transcription.append(&model_status);
+        let download_button = gtk::Button::with_label("Download model · 663 MB");
+        download_button.add_css_class("primary");
+        download_button.set_halign(gtk::Align::Start);
+        download_button.set_margin_start(14);
+        download_button.set_margin_bottom(14);
+        {
+            let action = action.clone();
+            download_button.connect_clicked(move |_| action("download"));
+        }
+        transcription.append(&download_button);
+        let processing = section(&pages[1], "Audio processing");
+        let memory = section(&pages[1], "Memory");
+        let vocabulary = section(&pages[2], "Custom vocabulary");
+        let near = section(&pages[2], "Near-miss correction");
+        let corrections = section(&pages[3], "Auto-correction");
+        let filters = section(&pages[3], "Word filters");
+        let repetitions = section(&pages[3], "Repetitions");
+        let json = serde_json::to_value(values).expect("valid settings serialize");
+        for (key, title, detail, group) in [
+            (
+                "paste",
+                "Paste after dictation",
+                "Insert text into the app where you started speaking.",
+                &dictation,
+            ),
+            (
+                "trailing_space",
+                "Add a space after pasted text",
+                "Keeps consecutive dictations from running together.",
+                &dictation,
+            ),
+            (
+                "press_enter",
+                "Press Enter after pasting",
+                "Sends chat messages. Never sends Enter to terminals.",
+                &dictation,
+            ),
+            (
+                "keep_mic_ready",
+                "Keep microphone ready",
+                "Holds the microphone for 30 seconds and keeps half a second before your shortcut.",
+                &microphones,
+            ),
+            (
+                "sounds",
+                "Play start and stop sounds",
+                "The start sound plays once the microphone is live.",
+                &feedback,
+            ),
+            (
+                "pause_media",
+                "Pause music while dictating",
+                "Pauses only players that are playing, then resumes them.",
+                &feedback,
+            ),
+            (
+                "cut_silence",
+                "Cut silence before recognition",
+                "Removes long pauses with on-device voice detection; keeps padding around speech.",
+                &processing,
+            ),
+            (
+                "noise_suppression",
+                "Suppress background noise",
+                "Cleans room noise before recognition. Adds processing time.",
+                &processing,
+            ),
+            (
+                "vocabulary_boosting",
+                "Boost vocabulary during recognition",
+                "Experimental. Slows decoding and can insert unwanted words.",
+                &vocabulary,
+            ),
+            (
+                "fuzzy_vocabulary",
+                "Fix near-miss spellings",
+                "Matches similar spellings and sounds, including split names such as Charge B.",
+                &near,
+            ),
+            (
+                "auto_correct",
+                "Apply saved corrections",
+                "Apply literal rules and preferred vocabulary capitalization.",
+                &corrections,
+            ),
+            (
+                "filter_words",
+                "Remove listed words and phrases",
+                "Preserve URLs, email addresses, quoted text and inline code.",
+                &filters,
+            ),
+            (
+                "remove_repetitions",
+                "Remove adjacent repeated words",
+                "Optional: the the becomes the. Leave off to preserve emphasis.",
+                &repetitions,
+            ),
+        ] {
+            let switch = gtk::Switch::builder()
+                .active(json[key].as_bool().unwrap_or(false))
+                .build();
+            let item = row(group, title, detail, &switch);
+            rows.push((item, switch.clone().upcast()));
+            controls.push((key.to_string(), Control::Switch(switch)));
+        }
+        let mut sources = vec![("auto".to_string(), "System default".to_string())];
+        sources.extend(audio::sources());
+        if !sources.iter().any(|(key, _)| key == &values.input_target) {
+            sources.push((
+                values.input_target.clone(),
+                format!("{} (unavailable)", values.input_target),
+            ));
+        }
+        for (key, title, detail, choices, group) in [
+            (
+                "input_target",
+                "Input device",
+                "Used the next time you start dictating.",
+                sources,
+                &microphones,
+            ),
+            (
+                "unload_minutes",
+                "Unload model when idle",
+                "Releases model memory and reloads while you speak.",
+                [0, 5, 10, 15, 30, 60]
+                    .into_iter()
+                    .map(|n| {
+                        (
+                            n.to_string(),
+                            if n == 0 {
+                                "Never".into()
+                            } else {
+                                format!("After {n} minutes")
+                            },
+                        )
+                    })
+                    .collect(),
+                &memory,
+            ),
+        ] {
+            let labels: Vec<&str> = choices
+                .iter()
+                .map(|(_, description)| description.as_str())
+                .collect();
+            let dropdown = gtk::DropDown::from_strings(&labels);
+            let current = if key == "unload_minutes" {
+                values.unload_minutes.to_string()
+            } else {
+                values.input_target.clone()
+            };
+            dropdown.set_selected(
+                choices
+                    .iter()
+                    .position(|(id, _)| id == &current)
+                    .unwrap_or(0) as u32,
+            );
+            let item = row(group, title, detail, &dropdown);
+            rows.push((item, dropdown.clone().upcast()));
+            controls.push((
+                key.to_string(),
+                Control::Choice(dropdown, choices.into_iter().map(|(id, _)| id).collect()),
+            ));
+        }
+        let prompt = gtk::Entry::builder()
+            .text(&values.prompt)
+            .placeholder_text("niri, Hype Flow, project names…")
+            .hexpand(true)
+            .build();
+        let item = row(
+            &vocabulary,
+            "Names and specialist terms",
+            "Separate names with commas or new lines; at most 100 entries.",
+            &prompt,
+        );
+        rows.push((item, prompt.clone().upcast()));
+        controls.push(("prompt".into(), Control::Entry(prompt)));
+        for (key, title, detail, minimum, maximum, step, group) in [
+            (
+                "boost_score",
+                "Vocabulary strength",
+                "Start low. Strong bias can insert words you did not say.",
+                0.5,
+                3.0,
+                0.5,
+                &vocabulary,
+            ),
+            (
+                "fuzzy_tolerance",
+                "Tolerance",
+                "Higher catches more mishearings but risks replacing real words.",
+                0.05,
+                0.4,
+                0.01,
+                &near,
+            ),
+        ] {
+            let spin = gtk::SpinButton::with_range(minimum, maximum, step);
+            spin.set_digits(if key == "boost_score" { 1 } else { 2 });
+            spin.set_value(json[key].as_f64().unwrap_or(minimum));
+            let item = row(group, title, detail, &spin);
+            rows.push((item, spin.clone().upcast()));
+            controls.push((key.to_string(), Control::Number(spin)));
+        }
+        for (key, title, detail, group) in [
+            (
+                "corrections",
+                "Correction rules",
+                "One rule per line: heard words => replacement. Example: open ai => OpenAI",
+                &corrections,
+            ),
+            (
+                "blocked_words",
+                "Words and phrases to remove",
+                "Separate entries with commas or new lines. Only list words you want removed.",
+                &filters,
+            ),
+        ] {
+            let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+            body.add_css_class("panel-body");
+            body.append(&label(detail, "muted"));
+            let editor = gtk::TextView::builder()
+                .wrap_mode(gtk::WrapMode::WordChar)
+                .top_margin(8)
+                .bottom_margin(8)
+                .left_margin(10)
+                .right_margin(10)
+                .build();
+            editor.update_property(&[gtk::accessible::Property::Label(title)]);
+            editor
+                .buffer()
+                .set_text(json[key].as_str().unwrap_or_default());
+            let scroll = gtk::ScrolledWindow::builder()
+                .min_content_height(100)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .child(&editor)
+                .build();
+            scroll.add_css_class("text-editor");
+            body.append(&scroll);
+            group.append(&body);
+            controls.push((key.to_string(), Control::Text(editor.buffer())));
+        }
+        let transcript = section(&pages[0], "Last transcript");
+        for (title, detail, name) in [
+            (
+                "Copy transcript",
+                "Recover the last dictation for this session.",
+                "copy-last",
+            ),
+            (
+                "Copy original",
+                "Recognizer output before corrections and filtering.",
+                "copy-raw",
+            ),
+        ] {
+            let button = gtk::Button::with_label(title);
+            let action = action.clone();
+            button.connect_clicked(move |_| action(name));
+            row(&transcript, title, detail, &button);
+        }
+        pages[0].append(&label(
+            "Super + Ctrl + Space starts dictation. Press again to finish.",
+            "muted",
+        ));
+        pages[3].append(&label("Copy original in General recovers text before cleanup. Your transcript hook receives cleaned text and has 30 seconds; on failure, cleaned text is kept.", "muted"));
+        let shortcuts = section(&pages[4], "Keyboard shortcuts");
+        shortcuts.append(&label(
+            "Dictate: Super + Ctrl + Space\nCancel: Super + Ctrl + Escape",
+            "panel-body",
+        ));
+        let integration = section(&pages[4], "niri integration");
+        let configure = gtk::Button::with_label("Configure niri");
+        {
+            let action = action.clone();
+            configure.connect_clicked(move |_| action("shortcuts"));
+        }
+        row(
+            &integration,
+            "Desktop shortcuts and autostart",
+            "Validates settings and saves a backup before applying.",
+            &configure,
+        );
+        pages[4].append(&label("The notch shows microphone levels. Click its capsule to finish, or right-click to cancel.", "muted"));
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        footer.add_css_class("settings-footer");
+        let status = label("Ready", "muted");
+        status.set_hexpand(true);
+        footer.append(&status);
+        let save_button = gtk::Button::with_label("Save changes");
+        save_button.add_css_class("primary");
+        save_button.set_sensitive(false);
+        footer.append(&save_button);
+        content.append(&footer);
+        window.set_child(Some(&shell));
+        let home = Rc::new(Self {
+            window,
+            stack,
+            navigation,
+            controls,
+            save_button,
+            status,
+            badge,
+            download_button,
+            values: RefCell::new(values.clone()),
+            model_status,
+            status_dot,
+            sidebar,
+            navigation_labels,
+            rows,
+            compact: Cell::new(false),
+            title,
+        });
+        let weak = Rc::downgrade(&home);
+        home.navigation.connect_row_selected(move |_, row| {
+            if let (Some(home), Some(row)) = (weak.upgrade(), row)
+                && let Some((name, title, _)) = PAGES.get(row.index() as usize)
+            {
+                home.stack.set_visible_child_name(name);
+                home.title.set_label(title);
+            }
+        });
+        let weak = Rc::downgrade(&home);
+        let dirty: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(home) = weak.upgrade() {
+                home.save_button.set_sensitive(true);
+                home.save_button.set_label("Save changes");
+            }
+        });
+        for (_, control) in &home.controls {
+            control.connect_changed(dirty.clone());
+        }
+        let weak = Rc::downgrade(&home);
+        home.save_button.connect_clicked(move |_| {
+            if let Some(home) = weak.upgrade() {
+                match home.changes() {
+                    Ok(values) => {
+                        if save(values.clone()) {
+                            home.saved(values);
+                        }
+                    }
+                    Err(error) => home.feedback(&format!("{error:#}")),
+                }
+            }
+        });
+        let keys = gtk::EventControllerKey::new();
+        let weak = Rc::downgrade(&home);
+        keys.connect_key_pressed(move |_, key, _, modifiers| {
+            if modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+                if key == gdk::Key::w || key == gdk::Key::W {
+                    if let Some(home) = weak.upgrade() {
+                        home.window.set_visible(false);
+                    }
+                    return glib::Propagation::Stop;
+                }
+                if key == gdk::Key::q || key == gdk::Key::Q {
+                    action("quit");
+                    return glib::Propagation::Stop;
+                }
+            }
+            glib::Propagation::Proceed
+        });
+        home.window.add_controller(keys);
+        let weak = Rc::downgrade(&home);
+        home.window.add_tick_callback(move |window, _| {
+            let Some(home) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            home.resize_layout(window.width());
+            glib::ControlFlow::Continue
+        });
+        home.navigation
+            .select_row(home.navigation.row_at_index(0).as_ref());
+        home
+    }
+
+    pub fn changes(&self) -> anyhow::Result<Config> {
+        let mut values = serde_json::to_value(&*self.values.borrow())?;
+        for (key, control) in &self.controls {
+            let mut value = control.value();
+            if key == "unload_minutes" {
+                value = serde_json::json!(value.as_str().unwrap_or("10").parse::<u32>()?);
+            }
+            values[key] = value;
+        }
+        let config: Config = serde_json::from_value(values)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn resize_layout(&self, width: i32) {
+        let compact = width < 760;
+        if self.compact.replace(compact) == compact {
+            return;
+        }
+        self.sidebar
+            .set_size_request(if compact { 64 } else { 200 }, -1);
+        for label in &self.navigation_labels {
+            label.set_visible(!compact);
+        }
+        for (row, control) in &self.rows {
+            row.set_orientation(if compact {
+                gtk::Orientation::Vertical
+            } else {
+                gtk::Orientation::Horizontal
+            });
+            control.set_halign(if compact {
+                gtk::Align::Start
+            } else {
+                gtk::Align::End
+            });
+        }
+    }
+
+    pub fn saved(self: &Rc<Self>, values: Config) {
+        *self.values.borrow_mut() = values;
+        self.save_button.set_sensitive(false);
+        self.save_button.set_label("Saved");
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1600), move || {
+            if let Some(home) = weak.upgrade()
+                && !home.save_button.is_sensitive()
+            {
+                home.save_button.set_label("Save changes");
+            }
+        });
+    }
+
+    pub fn feedback(&self, message: &str) {
+        self.status.set_label(message);
+        self.status.set_tooltip_text(Some(message));
+    }
+
+    pub fn set_downloading(&self, downloading: bool) {
+        self.download_button.set_sensitive(!downloading);
+        self.download_button.set_label(if downloading {
+            "Installing…"
+        } else {
+            "Download model · 663 MB"
+        });
+    }
+
+    pub fn update(&self, state: &str, message: &str, ready: bool) {
+        self.feedback(message);
+        self.download_button.set_visible(!ready);
+        let model = std::path::Path::new(&self.values.borrow().model).to_path_buf();
+        let installed = setup::MODEL_FILES
+            .iter()
+            .all(|name| model.join(name).is_file());
+        if installed {
+            self.download_button.set_label("Update speech support");
+        }
+        self.model_status.set_label(if ready {
+            "Installed on this device"
+        } else if installed {
+            "Update speech support to enable all features."
+        } else {
+            "Download the model to start dictating."
+        });
+        self.badge.set_label(match state {
+            "loading" => "Loading",
+            "starting" => "Starting",
+            "recording" => "Listening",
+            "transcribing" => "Transcribing",
+            "delivering" => "Copying",
+            "error" => "Needs attention",
+            _ => "On-device",
+        });
+        for tone in ["ok", "busy", "error"] {
+            self.status_dot.remove_css_class(tone);
+        }
+        self.status_dot.add_css_class(if state == "error" {
+            "error"
+        } else if ready && matches!(state, "idle" | "done") {
+            "ok"
+        } else {
+            "busy"
+        });
+        if state == "error" {
+            self.status.add_css_class("error");
+        } else {
+            self.status.remove_css_class("error");
+        }
+    }
+}
+
+struct PillState {
+    phase: String,
+    message: String,
+    volume: f64,
+    duration: f64,
+    levels: [f64; 11],
+    last_sample: i64,
+    began: i64,
+    width: f64,
+    target: f64,
+}
+
+pub struct Overlay {
+    pub window: gtk::Window,
+    area: gtk::DrawingArea,
+    state: Rc<RefCell<PillState>>,
+}
+
+impl Overlay {
+    pub fn new(action: Rc<dyn Fn(&str)>) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            gtk4_layer_shell::is_supported(),
+            "Wayland layer-shell is unavailable. Run inside niri."
+        );
+        let window = gtk::Window::builder()
+            .title("Hype Flow")
+            .decorated(false)
+            .resizable(false)
+            .build();
+        window.set_widget_name("hype-flow");
+        window.init_layer_shell();
+        window.set_namespace(Some("hype-flow"));
+        window.set_layer(Layer::Overlay);
+        window.set_keyboard_mode(KeyboardMode::None);
+        window.set_exclusive_zone(0);
+        window.set_anchor(Edge::Bottom, true);
+        window.set_margin(Edge::Bottom, 20);
+        let css = gtk::CssProvider::new();
+        css.load_from_string("#hype-flow {background:transparent; box-shadow:none;}");
+        if let Some(display) = gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+        let area = gtk::DrawingArea::builder()
+            .content_width(340)
+            .content_height(72)
+            .build();
+        area.update_property(&[gtk::accessible::Property::Label("Hype Flow dictation")]);
+        window.set_child(Some(&area));
+        let state = Rc::new(RefCell::new(PillState {
+            phase: "idle".into(),
+            message: "Ready".into(),
+            volume: 0.0,
+            duration: 0.0,
+            levels: [0.0; 11],
+            last_sample: 0,
+            began: 0,
+            width: 270.0,
+            target: 270.0,
+        }));
+        let draw_state = state.clone();
+        area.set_draw_func(move |area, cr, width, height| {
+            let mut state = draw_state.borrow_mut();
+            let now = glib::monotonic_time();
+            if now - state.last_sample > 80_000 && state.phase == "recording" {
+                state.levels.rotate_left(1);
+                state.levels[10] = state.volume;
+                state.last_sample = now;
+            }
+            let animated =
+                gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations());
+            if animated {
+                state.width += (state.target - state.width) * 0.2;
+            } else {
+                state.width = state.target;
+            }
+            let w = state.width;
+            let h = 48.0;
+            let x = (width as f64 - w) / 2.0;
+            let y = (height as f64 - h) / 2.0;
+            let surface = area.native().and_then(|native| native.surface());
+            if let Some(surface) = surface {
+                let region = gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
+                    x as i32,
+                    y as i32,
+                    w.ceil() as i32,
+                    h as i32,
+                ));
+                surface.set_input_region(Some(&region));
+            }
+            if matches!(state.phase.as_str(), "transcribing" | "delivering") {
+                let angle = if animated {
+                    (now as f64 / 1_600_000.0).fract() * std::f64::consts::TAU
+                } else {
+                    0.0
+                };
+                cr.set_source_rgba(0.22, 0.60, 0.97, 0.2);
+                capsule(cr, x - 4.0, y - 4.0, w + 8.0, h + 8.0);
+                let _ = cr.fill();
+                let gradient = gtk::cairo::LinearGradient::new(
+                    x + w / 2.0 + angle.cos() * w / 2.0,
+                    y + angle.sin() * h,
+                    x + w / 2.0 - angle.cos() * w / 2.0,
+                    y - angle.sin() * h,
+                );
+                gradient.add_color_stop_rgb(0.0, 0.92, 0.97, 1.0);
+                gradient.add_color_stop_rgb(0.3, 0.22, 0.74, 0.97);
+                gradient.add_color_stop_rgb(1.0, 0.15, 0.38, 0.92);
+                let _ = cr.set_source(&gradient);
+                capsule(cr, x - 2.0, y - 2.0, w + 4.0, h + 4.0);
+                let _ = cr.fill();
+            }
+            capsule(cr, x, y, w, h);
+            cr.set_source_rgb(0.125, 0.133, 0.145);
+            let _ = cr.fill_preserve();
+            cr.set_source_rgb(if state.phase == "error" { 0.54 } else { 0.23 }, 0.23, 0.25);
+            cr.set_line_width(1.0);
+            let _ = cr.stroke();
+            cr.set_source_rgb(0.91, 0.91, 0.91);
+            cr.set_line_width(2.0);
+            cr.set_line_cap(gtk::cairo::LineCap::Round);
+            let cx = x + 24.0;
+            let cy = height as f64 / 2.0;
+            capsule(cr, cx - 3.0, cy - 9.0, 6.0, 13.0);
+            let _ = cr.stroke();
+            cr.arc(cx, cy - 1.0, 7.0, 0.0, std::f64::consts::PI);
+            let _ = cr.stroke();
+            cr.move_to(cx, cy + 6.0);
+            cr.line_to(cx, cy + 10.0);
+            cr.move_to(cx - 4.0, cy + 10.0);
+            cr.line_to(cx + 4.0, cy + 10.0);
+            let _ = cr.stroke();
+            if state.phase == "recording" && now - state.began > 660_000 {
+                for (index, level) in state.levels.iter().enumerate() {
+                    let length = 4.0 + level.powf(0.75) * 18.0;
+                    let x = cx + 20.0 + index as f64 * 5.0;
+                    cr.move_to(x, cy - length / 2.0);
+                    cr.line_to(x, cy + length / 2.0);
+                }
+                let _ = cr.stroke();
+            } else if !matches!(
+                state.phase.as_str(),
+                "starting" | "recording" | "transcribing" | "delivering"
+            ) {
+                let title = if state.phase == "done" {
+                    state.message.as_str()
+                } else if state.phase == "error" {
+                    "Hype Flow needs attention"
+                } else if state.phase == "loading" {
+                    "Loading speech model"
+                } else {
+                    "Hype Flow"
+                };
+                cr.select_font_face(
+                    "Noto Sans",
+                    gtk::cairo::FontSlant::Normal,
+                    gtk::cairo::FontWeight::Normal,
+                );
+                cr.set_font_size(12.0);
+                cr.move_to(x + 46.0, cy - 2.0);
+                let clipped: String = title.chars().take(38).collect();
+                let _ = cr.show_text(&clipped);
+                cr.set_font_size(10.0);
+                cr.set_source_rgb(0.60, 0.61, 0.63);
+                cr.move_to(x + 46.0, cy + 13.0);
+                let detail = if state.phase == "error" {
+                    state.message.chars().take(42).collect::<String>()
+                } else {
+                    "Press your shortcut to speak".into()
+                };
+                let _ = cr.show_text(&detail);
+            }
+        });
+        let gesture = gtk::GestureClick::new();
+        gesture.set_button(0);
+        let click_state = state.clone();
+        gesture.connect_released(move |gesture, _, _, _| {
+            if gesture.current_button() == 3 {
+                action("cancel");
+            } else if gesture.current_button() == 1 {
+                action(
+                    if matches!(
+                        click_state.borrow().phase.as_str(),
+                        "recording" | "starting"
+                    ) {
+                        "toggle"
+                    } else {
+                        "show"
+                    },
+                );
+            }
+        });
+        area.add_controller(gesture);
+        area.add_tick_callback(|area, _| {
+            area.queue_draw();
+            glib::ControlFlow::Continue
+        });
+        Ok(Self {
+            window,
+            area,
+            state,
+        })
+    }
+
+    pub fn update(&self, phase: &str, message: &str, visible: bool, volume: f64, duration: f64) {
+        let mut state = self.state.borrow_mut();
+        if state.phase != phase {
+            state.began = glib::monotonic_time();
+            state.levels = [0.0; 11];
+        }
+        state.phase = phase.into();
+        state.message = message.into();
+        state.volume = volume;
+        state.duration = duration;
+        state.target = if phase == "recording" {
+            114.0
+        } else if matches!(phase, "starting" | "transcribing" | "delivering") {
+            48.0
+        } else {
+            310.0
+        };
+        self.area
+            .update_property(&[gtk::accessible::Property::Label(message)]);
+        self.window.set_tooltip_text(Some(if phase == "recording" {
+            "Click to finish dictation. Right-click to cancel."
+        } else {
+            message
+        }));
+        self.window.set_visible(visible);
+        self.area.queue_draw();
+    }
+}
+
+fn capsule(cr: &gtk::cairo::Context, x: f64, y: f64, width: f64, height: f64) {
+    let radius = height.min(width) / 2.0;
+    cr.new_sub_path();
+    cr.arc(
+        x + width - radius,
+        y + radius,
+        radius,
+        -std::f64::consts::FRAC_PI_2,
+        std::f64::consts::FRAC_PI_2,
+    );
+    cr.arc(
+        x + radius,
+        y + radius,
+        radius,
+        std::f64::consts::FRAC_PI_2,
+        3.0 * std::f64::consts::FRAC_PI_2,
+    );
+    cr.close_path();
+}

@@ -12,7 +12,7 @@ threads = 4
 # Names and phrases, separated by commas or newlines; at most 100 entries.
 # Empty by default. Listed spellings also supply preferred capitalization.
 prompt = ""
-vocabulary_boosting = true
+vocabulary_boosting = false
 # Decoder bias, not a guaranteed correction. Keep low; valid range 0.5 to 3.0.
 boost_score = 1.5
 
