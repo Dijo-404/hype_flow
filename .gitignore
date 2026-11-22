@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.runtime/
+*.part
+*.egg-info/
+build/
+dist/
+target/
+.migration/
+.superpowers/

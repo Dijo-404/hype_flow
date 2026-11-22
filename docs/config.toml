@@ -1,0 +1,31 @@
+# Copy to ~/.config/hype-flow/config.toml. Every key is optional.
+language = "en"
+# Parakeet Unified supports English only. "auto" is accepted for old configurations.
+input_target = "auto"
+paste = true
+threads = 4
+# Model files and runtime installed by the app:
+# model = "/absolute/path/to/parakeet-unified-en-int8"
+# server = "/absolute/path/to/backend/parakeet/recognizer"
+# gpu is retained for compatibility; this runtime uses the CPU.
+
+# Names and phrases, separated by commas or newlines; at most 100 entries.
+# Empty by default. Listed spellings also supply preferred capitalization.
+prompt = ""
+vocabulary_boosting = true
+# Decoder bias, not a guaranteed correction. Keep low; valid range 0.5 to 3.0.
+boost_score = 1.5
+
+# Literal whole-word/phrase substitutions only; no guessed grammar or spelling.
+auto_correct = true
+corrections = ""
+# Example, one rule per line:
+# corrections = """
+# open ai => OpenAI
+# """
+
+filter_words = true
+blocked_words = "um, uh, erm, umm, uhh"
+# Optional adjacent repeated-word removal. Verbal restarts are never guessed.
+remove_repetitions = false
+# General > Copy original recovers recognition before text cleanup.
