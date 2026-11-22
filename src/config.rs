@@ -83,6 +83,8 @@ pub struct Config {
     pub unload_minutes: u32,
     pub cut_silence: bool,
     pub noise_suppression: bool,
+    pub dictation_shortcut: String,
+    pub cancel_shortcut: String,
 }
 
 impl Default for Config {
@@ -122,6 +124,8 @@ impl Default for Config {
             unload_minutes: 10,
             cut_silence: true,
             noise_suppression: false,
+            dictation_shortcut: "Mod+Ctrl+Space".into(),
+            cancel_shortcut: "Mod+Ctrl+Escape".into(),
         }
     }
 }
@@ -188,6 +192,12 @@ impl Config {
         vocabulary::hotwords(&self.prompt)?;
         vocabulary::terms(&self.blocked_words)?;
         cleanup::corrections(&self.corrections)?;
+        let dictate = crate::shortcuts::normalize(&self.dictation_shortcut)?;
+        let cancel = crate::shortcuts::normalize(&self.cancel_shortcut)?;
+        ensure!(
+            !dictate.eq_ignore_ascii_case(&cancel),
+            "Dictate and Cancel must use different shortcuts"
+        );
         Ok(())
     }
 

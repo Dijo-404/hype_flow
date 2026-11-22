@@ -113,8 +113,11 @@ if sys.argv[1:] == ["msg", "--json", "focused-window"] and os.path.exists(os.env
     time.sleep(0.4)
 os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
 ''')
-        (config / "config.toml").write_text('sounds = false\npause_media = false\nkeep_mic_ready = true\ncorrections = "open ai => OpenAI"\n')
-        env = {**os.environ, "XDG_DATA_HOME": str(root / "data"), "XDG_CONFIG_HOME": str(root / "config"), "PATH": str(fake) + ":" + os.environ["PATH"], "HYPE_TEST_PID_FILE": str(root / "capture-pids"), "HYPE_TEST_DELAY": str(root / "focus-delay")}
+        (config / "config.toml").write_text('sounds = false\npause_media = false\nkeep_mic_ready = true\ncorrections = "open ai => OpenAI"\ndictation_shortcut = "Alt+Space"\n')
+        niri_config = root / "config/niri/config.kdl"
+        niri_config.parent.mkdir(parents=True)
+        niri_config.write_text('input { keyboard { xkb { layout "us"; }; }; }\n')
+        env = {**os.environ, "XDG_DATA_HOME": str(root / "data"), "XDG_CONFIG_HOME": str(root / "config"), "NIRI_CONFIG": str(niri_config), "PATH": str(fake) + ":" + os.environ["PATH"], "HYPE_TEST_PID_FILE": str(root / "capture-pids"), "HYPE_TEST_DELAY": str(root / "focus-delay")}
         log = (root / "app.log").open("wb")
         app = subprocess.Popen([executable, "--background"], env=env, stdout=log, stderr=log, start_new_session=True)
         group = Gio.DBusActionGroup.get(Gio.bus_get_sync(Gio.BusType.SESSION, None), "dev.hype.Flow", "/dev/hype/Flow")
@@ -138,6 +141,11 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             wait(lambda: group.has_action("toggle") and phase("idle"), "ready actions")
             for name in ("toggle", "cancel", "show", "copy-last", "copy-raw", "quit"):
                 assert group.has_action(name), name
+            group.activate_action("shortcuts", None)
+            wait(lambda: niri_config.with_name("hype-flow.kdl").exists(), "custom shortcut installation")
+            bindings = niri_config.with_name("hype-flow.kdl").read_text()
+            assert "Alt+Space" in bindings and "Mod+Ctrl+Space" not in bindings
+            assert "Mod+Ctrl+Escape" in bindings
             subprocess.run(["wl-copy", "--sensitive"], input=b"previous clipboard", check=True)
             group.activate_action("toggle", None)
             wait(lambda: phase("recording"), "microphone ready")

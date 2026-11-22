@@ -1,6 +1,6 @@
 #![cfg(feature = "desktop")]
 
-use gtk::{gio, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use gtk4_layer_shell::LayerShell;
 use hype_flow::{
     config::Config,
@@ -73,6 +73,65 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
                 .unwrap();
         }
     }
+    let controllers = home.window.observe_controllers();
+    let keys = (0..controllers.n_items())
+        .find_map(|index| {
+            controllers
+                .item(index)?
+                .downcast::<gtk::EventControllerKey>()
+                .ok()
+        })
+        .unwrap();
+    let capture = home
+        .controls
+        .iter()
+        .find_map(|(key, control)| match (key.as_str(), control) {
+            ("dictation_shortcut", Control::Shortcut(capture)) => Some(capture.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let press = |key: gdk::Key, modifiers: gdk::ModifierType| {
+        assert!(keys.emit_by_name::<bool>("key-pressed", &[&key, &0u32, &modifiers]));
+    };
+    capture.button.emit_clicked();
+    assert_eq!(capture.button.label().as_deref(), Some("Press keys…"));
+    press(gdk::Key::Control_L, gdk::ModifierType::CONTROL_MASK);
+    assert_eq!(
+        home.changes().unwrap().dictation_shortcut,
+        values.dictation_shortcut
+    );
+    press(gdk::Key::Escape, gdk::ModifierType::empty());
+    assert_eq!(
+        home.changes().unwrap().dictation_shortcut,
+        values.dictation_shortcut
+    );
+    assert!(!home.save_button.is_sensitive());
+    capture.button.emit_clicked();
+    home.navigation.grab_focus();
+    assert_ne!(capture.button.label().as_deref(), Some("Press keys…"));
+    capture.button.emit_clicked();
+    press(gdk::Key::q, gdk::ModifierType::CONTROL_MASK);
+    assert!(!actions.borrow().iter().any(|action| action == "quit"));
+    assert_eq!(home.changes().unwrap().dictation_shortcut, "Ctrl+q");
+    capture.button.emit_clicked();
+    settle();
+    let surface = home
+        .window
+        .surface()
+        .unwrap()
+        .downcast::<gdk::Toplevel>()
+        .unwrap();
+    assert!(surface.is_shortcuts_inhibited());
+    assert!(
+        std::process::Command::new("wtype")
+            .args(["-M", "alt", "-k", "space", "-m", "alt"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    settle();
+    assert_eq!(capture.button.label().as_deref(), Some("Alt + Space"));
+    assert!(!surface.is_shortcuts_inhibited());
     for (key, control) in &home.controls {
         match (key.as_str(), control) {
             ("prompt", Control::Entry(entry)) => entry.set_text("नमस्ते, niri"),
@@ -86,6 +145,8 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     home.save_button.emit_clicked();
     let config = saved.borrow()[0].clone();
     assert_eq!(config.prompt, "नमस्ते, niri");
+    assert_eq!(config.dictation_shortcut, "Alt+Space");
+    assert_eq!(config.cancel_shortcut, "Mod+Ctrl+Escape");
     assert!(!config.paste);
     assert_eq!(config.boost_score, 2.0);
     assert_eq!(config.corrections, "open ai => OpenAI");

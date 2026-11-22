@@ -363,7 +363,14 @@ impl AppState {
             }
             return false;
         }
-        if let Err(error) = values.save() {
+        let shortcuts_changed = values.dictation_shortcut != self.values.dictation_shortcut
+            || values.cancel_shortcut != self.values.cancel_shortcut;
+        let saved = if shortcuts_changed {
+            shortcuts::save(&values).map(|_| ())
+        } else {
+            values.save()
+        };
+        if let Err(error) = saved {
             if let Some(home) = &self.home {
                 home.feedback(&format!("{error:#}"));
             }
@@ -399,7 +406,15 @@ impl AppState {
             home.feedback("Settings saved");
         }
         let last = self.last.clone();
-        self.publish(last.0, &last.1, last.2, last.3, last.4);
+        let message = if shortcuts_changed {
+            format!(
+                "Shortcuts saved. {} starts dictation.",
+                self.values.dictation_shortcut
+            )
+        } else {
+            last.1
+        };
+        self.publish(last.0, &message, last.2, last.3, last.4);
         true
     }
 

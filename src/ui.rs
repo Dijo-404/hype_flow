@@ -18,6 +18,144 @@ pub const PAGES: [(&str, &str, &str); 5] = [
     ("shortcuts", "Shortcuts", "input-keyboard-symbolic"),
 ];
 
+pub struct ShortcutCapture {
+    pub button: gtk::Button,
+    title: String,
+    value: RefCell<String>,
+    recording: Cell<bool>,
+    surface: RefCell<Option<gdk::Toplevel>>,
+    changed: RefCell<Option<Rc<dyn Fn()>>>,
+}
+
+impl ShortcutCapture {
+    fn new(title: &str, value: &str) -> Rc<Self> {
+        let capture = Rc::new(Self {
+            button: gtk::Button::builder().width_request(184).build(),
+            title: title.into(),
+            value: RefCell::new(value.into()),
+            recording: Cell::new(false),
+            surface: RefCell::new(None),
+            changed: RefCell::new(None),
+        });
+        capture
+            .button
+            .set_tooltip_text(Some("Click, then press your shortcut. Escape cancels."));
+        let weak = Rc::downgrade(&capture);
+        capture.button.connect_clicked(move |_| {
+            if let Some(capture) = weak.upgrade() {
+                if capture.recording.get() {
+                    capture.cancel();
+                    return;
+                }
+                capture.button.grab_focus();
+                capture.recording.set(true);
+                capture.label("Press keys…");
+                if let Some(surface) = capture
+                    .button
+                    .native()
+                    .and_then(|native| native.surface())
+                    .and_then(|surface| surface.downcast::<gdk::Toplevel>().ok())
+                {
+                    // Let an existing global shortcut reach the capture control instead of starting dictation.
+                    surface.inhibit_system_shortcuts(None::<gdk::Event>);
+                    *capture.surface.borrow_mut() = Some(surface);
+                }
+            }
+        });
+        let weak = Rc::downgrade(&capture);
+        capture.button.connect_has_focus_notify(move |button| {
+            if !button.has_focus()
+                && let Some(capture) = weak.upgrade()
+            {
+                capture.cancel();
+            }
+        });
+        capture.cancel();
+        capture
+    }
+
+    fn label(&self, label: &str) {
+        self.button.set_label(label);
+        self.button
+            .update_property(&[gtk::accessible::Property::Label(&format!(
+                "{} shortcut: {label}",
+                self.title
+            ))]);
+    }
+
+    fn cancel(&self) {
+        self.recording.set(false);
+        if let Some(surface) = self.surface.borrow_mut().take() {
+            surface.restore_system_shortcuts();
+        }
+        self.label(&self.value.borrow().replace('+', " + "));
+    }
+
+    fn key_pressed(&self, key: gdk::Key, modifiers: gdk::ModifierType) -> bool {
+        if !self.recording.get() {
+            return false;
+        }
+        let mut parts = Vec::new();
+        for (mask, name) in [
+            (gdk::ModifierType::SUPER_MASK, "Super"),
+            (gdk::ModifierType::CONTROL_MASK, "Ctrl"),
+            (gdk::ModifierType::ALT_MASK, "Alt"),
+            (gdk::ModifierType::SHIFT_MASK, "Shift"),
+        ] {
+            if modifiers.contains(mask) {
+                parts.push(name.to_owned());
+            }
+        }
+        if key == gdk::Key::Escape && parts.is_empty() {
+            self.cancel();
+            return true;
+        }
+        if matches!(
+            key,
+            gdk::Key::Shift_L
+                | gdk::Key::Shift_R
+                | gdk::Key::Control_L
+                | gdk::Key::Control_R
+                | gdk::Key::Alt_L
+                | gdk::Key::Alt_R
+                | gdk::Key::Super_L
+                | gdk::Key::Super_R
+                | gdk::Key::Meta_L
+                | gdk::Key::Meta_R
+                | gdk::Key::Hyper_L
+                | gdk::Key::Hyper_R
+                | gdk::Key::ISO_Level3_Shift
+                | gdk::Key::ISO_Level5_Shift
+        ) {
+            return true;
+        }
+        if parts.is_empty() {
+            self.label("Hold a modifier + key…");
+            return true;
+        }
+        if let Some(key) = key.to_lower().name() {
+            parts.push(key.to_string());
+            if let Ok(value) = crate::shortcuts::normalize(&parts.join("+")) {
+                let changed = *self.value.borrow() != value;
+                *self.value.borrow_mut() = value;
+                self.cancel();
+                if changed && let Some(changed) = &*self.changed.borrow() {
+                    changed();
+                }
+            }
+        }
+        true
+    }
+}
+
+impl Drop for ShortcutCapture {
+    fn drop(&mut self) {
+        if let Some(surface) = self.surface.get_mut().take() {
+            surface.restore_system_shortcuts();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Control {
     Switch(gtk::Switch),
@@ -25,6 +163,7 @@ pub enum Control {
     Text(gtk::TextBuffer),
     Number(gtk::SpinButton),
     Choice(gtk::DropDown, Vec<String>),
+    Shortcut(Rc<ShortcutCapture>),
 }
 
 impl Control {
@@ -33,6 +172,7 @@ impl Control {
         match self {
             Self::Switch(widget) => json!(widget.is_active()),
             Self::Entry(widget) => json!(widget.text().as_str()),
+            Self::Shortcut(capture) => json!(*capture.value.borrow()),
             Self::Text(buffer) => json!(
                 buffer
                     .text(&buffer.start_iter(), &buffer.end_iter(), true)
@@ -55,6 +195,9 @@ impl Control {
             }
             Self::Entry(widget) => {
                 widget.connect_changed(move |_| changed());
+            }
+            Self::Shortcut(capture) => {
+                *capture.changed.borrow_mut() = Some(changed);
             }
             Self::Text(buffer) => {
                 buffer.connect_changed(move |_| changed());
@@ -530,15 +673,32 @@ impl Home {
             row(&transcript, title, detail, &button);
         }
         pages[0].append(&label(
-            "Super + Ctrl + Space starts dictation. Press again to finish.",
+            "Use your Dictate shortcut to start. Press again to finish. Edit bindings in Shortcuts.",
             "muted",
         ));
         pages[3].append(&label("Copy original in General recovers text before cleanup. Your transcript hook receives cleaned text and has 30 seconds; on failure, cleaned text is kept.", "muted"));
         let shortcuts = section(&pages[4], "Keyboard shortcuts");
-        shortcuts.append(&label(
-            "Dictate: Super + Ctrl + Space\nCancel: Super + Ctrl + Escape",
-            "panel-body",
-        ));
+        for (key, title, detail, value) in [
+            (
+                "dictation_shortcut",
+                "Dictate",
+                "Start dictation; press again to finish.",
+                &values.dictation_shortcut,
+            ),
+            (
+                "cancel_shortcut",
+                "Cancel",
+                "Discard the current recording or transcription.",
+                &values.cancel_shortcut,
+            ),
+        ] {
+            let capture = ShortcutCapture::new(title, value);
+            let item = row(&shortcuts, title, detail, &capture.button);
+            capture.cancel();
+            rows.push((item, capture.button.clone().upcast()));
+            controls.push((key.into(), Control::Shortcut(capture)));
+        }
+        pages[4].append(&label("Click a shortcut, then press the keys you want. Escape cancels. Use Save changes to apply; existing bindings are checked first.", "muted"));
         let integration = section(&pages[4], "niri integration");
         let configure = gtk::Button::with_label("Configure niri");
         {
@@ -586,6 +746,7 @@ impl Home {
             if let (Some(home), Some(row)) = (weak.upgrade(), row)
                 && let Some((name, title, _)) = PAGES.get(row.index() as usize)
             {
+                home.cancel_shortcut_capture();
                 home.stack.set_visible_child_name(name);
                 home.title.set_label(title);
             }
@@ -614,8 +775,18 @@ impl Home {
             }
         });
         let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = Rc::downgrade(&home);
         keys.connect_key_pressed(move |_, key, _, modifiers| {
+            if let Some(home) = weak.upgrade() {
+                for (_, control) in &home.controls {
+                    if let Control::Shortcut(capture) = control
+                        && capture.key_pressed(key, modifiers)
+                    {
+                        return glib::Propagation::Stop;
+                    }
+                }
+            }
             if modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
                 if key == gdk::Key::w || key == gdk::Key::W {
                     if let Some(home) = weak.upgrade() {
@@ -632,6 +803,20 @@ impl Home {
         });
         home.window.add_controller(keys);
         let weak = Rc::downgrade(&home);
+        home.window.connect_is_active_notify(move |window| {
+            if !window.is_active()
+                && let Some(home) = weak.upgrade()
+            {
+                home.cancel_shortcut_capture();
+            }
+        });
+        let weak = Rc::downgrade(&home);
+        home.window.connect_hide(move |_| {
+            if let Some(home) = weak.upgrade() {
+                home.cancel_shortcut_capture();
+            }
+        });
+        let weak = Rc::downgrade(&home);
         home.window.add_tick_callback(move |window, _| {
             let Some(home) = weak.upgrade() else {
                 return glib::ControlFlow::Break;
@@ -644,6 +829,14 @@ impl Home {
         home
     }
 
+    fn cancel_shortcut_capture(&self) {
+        for (_, control) in &self.controls {
+            if let Control::Shortcut(capture) = control {
+                capture.cancel();
+            }
+        }
+    }
+
     pub fn changes(&self) -> anyhow::Result<Config> {
         let mut values = serde_json::to_value(&*self.values.borrow())?;
         for (key, control) in &self.controls {
@@ -653,7 +846,9 @@ impl Home {
             }
             values[key] = value;
         }
-        let config: Config = serde_json::from_value(values)?;
+        let mut config: Config = serde_json::from_value(values)?;
+        config.dictation_shortcut = crate::shortcuts::normalize(&config.dictation_shortcut)?;
+        config.cancel_shortcut = crate::shortcuts::normalize(&config.cancel_shortcut)?;
         config.validate()?;
         Ok(config)
     }

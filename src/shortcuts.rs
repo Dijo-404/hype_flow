@@ -1,4 +1,7 @@
-use crate::{config::config_dir, process::run_command};
+use crate::{
+    config::{Config, config_dir},
+    process::run_command,
+};
 use anyhow::{Context, Result, bail, ensure};
 use regex::Regex;
 use std::{
@@ -12,10 +15,69 @@ use std::{
 use tempfile::{Builder, NamedTempFile};
 
 const HEADER: &str = "// Managed by Hype Flow.\n";
-static KEY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b(Mod\+Ctrl\+(?:Space|Escape))(?:\s|\{)").unwrap());
+static KEY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?m)(?:^|[;{}])\s*"?([A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)+)"?(?:\s|\{)"#).unwrap()
+});
 static INCLUDE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?m)^\s*include\s+("(?:[^"\\]|\\.)*")"#).unwrap());
+
+pub fn normalize(shortcut: &str) -> Result<String> {
+    ensure!(shortcut.len() <= 120, "Shortcut is too long");
+    let parts: Vec<_> = shortcut.split('+').map(str::trim).collect();
+    ensure!(
+        parts.len() >= 2,
+        "Use a modifier and a key, for example Alt+Space"
+    );
+    let modifier = |part: &str| match part.to_ascii_lowercase().as_str() {
+        "mod" => Some("Mod"),
+        "super" | "win" => Some("Super"),
+        "ctrl" | "control" => Some("Ctrl"),
+        "alt" => Some("Alt"),
+        "shift" => Some("Shift"),
+        "mod5" | "iso_level3_shift" => Some("Mod5"),
+        "iso_level5_shift" => Some("ISO_Level5_Shift"),
+        _ => None,
+    };
+    let mut modifiers = HashSet::new();
+    for part in &parts[..parts.len() - 1] {
+        let name = modifier(part)
+            .context("Unknown shortcut modifier. Use Alt, Ctrl, Shift, Super or Mod")?;
+        ensure!(
+            modifiers.insert(name),
+            "Shortcut repeats the {name} modifier"
+        );
+    }
+    let key = parts.last().copied().unwrap_or_default();
+    ensure!(
+        !key.is_empty()
+            && key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            && modifier(key).is_none(),
+        "Shortcut needs a key name such as Space, Escape or F9"
+    );
+    let key = match key.to_ascii_lowercase().as_str() {
+        "space" => "Space",
+        "esc" | "escape" => "Escape",
+        "enter" | "return" => "Return",
+        "tab" => "Tab",
+        _ => key,
+    };
+    let mut result: Vec<_> = [
+        "Mod",
+        "Super",
+        "Ctrl",
+        "Alt",
+        "Shift",
+        "Mod5",
+        "ISO_Level5_Shift",
+    ]
+    .into_iter()
+    .filter(|name| modifiers.contains(name))
+    .collect();
+    result.push(key);
+    Ok(result.join("+"))
+}
 
 fn path_string(path: &Path) -> Result<&str> {
     path.to_str()
@@ -30,7 +92,12 @@ fn optional_contents(path: &Path) -> Result<Option<String>> {
     }
 }
 
-fn check_conflicts(path: &Path, managed: &Path, visited: &mut HashSet<PathBuf>) -> Result<()> {
+fn check_conflicts(
+    path: &Path,
+    managed: &Path,
+    keys: &[String],
+    visited: &mut HashSet<PathBuf>,
+) -> Result<()> {
     if path == managed {
         return Ok(());
     }
@@ -41,22 +108,27 @@ fn check_conflicts(path: &Path, managed: &Path, visited: &mut HashSet<PathBuf>) 
         return Ok(());
     }
     let content = fs::read_to_string(path)?;
-    if let Some(found) = KEY.captures(&content) {
-        bail!(
-            "{} is already bound in {}. Existing shortcuts were kept.",
-            &found[1],
-            path.file_name().unwrap_or_default().to_string_lossy()
-        );
+    for found in KEY.captures_iter(&content) {
+        if normalize(&found[1]).is_ok_and(|key| {
+            keys.iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(&key))
+        }) {
+            bail!(
+                "{} is already bound in {}. Existing shortcuts were kept.",
+                &found[1],
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+        }
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     for included in INCLUDE.captures_iter(&content) {
         let included: String = serde_json::from_str(&included[1])?;
-        check_conflicts(&parent.join(included), managed, visited)?;
+        check_conflicts(&parent.join(included), managed, keys, visited)?;
     }
     Ok(())
 }
 
-fn bindings(launcher: &Path) -> Result<String> {
+fn bindings(launcher: &Path, keys: &[String; 2]) -> Result<String> {
     let launcher = path_string(launcher)?;
     let executable = serde_json::to_string(launcher)?;
     let quoted = format!("'{}'", launcher.replace('\'', "'\"'\"'"));
@@ -73,8 +145,8 @@ fn bindings(launcher: &Path) -> Result<String> {
     Ok(format!(
         r#"{HEADER}spawn-at-startup {executable} "--background"
 binds {{
-    Mod+Ctrl+Space repeat=false hotkey-overlay-title="Dictate offline" {{ {}; }}
-    Mod+Ctrl+Escape repeat=false hotkey-overlay-title="Cancel dictation" {{ {}; }}
+    {} repeat=false hotkey-overlay-title="Dictate offline" {{ {}; }}
+    {} repeat=false hotkey-overlay-title="Cancel dictation" {{ {}; }}
 }}
 window-rule {{
     match app-id="^dev[.]hype[.]Flow$"
@@ -83,12 +155,22 @@ window-rule {{
     default-window-height {{ fixed 680; }}
 }}
 "#,
+        keys[0],
         command("toggle")?,
+        keys[1],
         command("cancel")?
     ))
 }
 
 pub fn install() -> Result<String> {
+    install_with(None)
+}
+
+pub fn save(values: &Config) -> Result<String> {
+    install_with(Some(values))
+}
+
+fn install_with(changes: Option<&Config>) -> Result<String> {
     let launcher = env::home_dir()
         .context("Could not find your home directory")?
         .join(".local/bin/hype-flow");
@@ -107,6 +189,21 @@ pub fn install() -> Result<String> {
     let parent = config
         .parent()
         .context("Missing niri configuration directory")?;
+    let lock = fs::File::open(parent)?;
+    lock.lock()?;
+    // Read saved shortcuts under the same lock so an older Configure request cannot overwrite a newer save.
+    let saved;
+    let values = if let Some(values) = changes {
+        values
+    } else {
+        saved = Config::load()?;
+        &saved
+    };
+    values.validate()?;
+    let keys = [
+        normalize(&values.dictation_shortcut)?,
+        normalize(&values.cancel_shortcut)?,
+    ];
     let target = parent.join("hype-flow.kdl");
     let current_bindings = optional_contents(&target)?;
     ensure!(
@@ -122,11 +219,11 @@ pub fn install() -> Result<String> {
     } else {
         parent.canonicalize()?.join("hype-flow.kdl")
     };
-    check_conflicts(&config, &managed, &mut HashSet::new())?;
+    check_conflicts(&config, &managed, &keys, &mut HashSet::new())?;
 
     let temporary = Builder::new().prefix(".hype-flow-").tempdir_in(parent)?;
     let generated = temporary.path().join("bindings.kdl");
-    fs::write(&generated, bindings(&launcher)?)?;
+    fs::write(&generated, bindings(&launcher, &keys)?)?;
     let staged_include = format!(
         "include {}",
         serde_json::to_string(path_string(&generated)?)?
@@ -176,17 +273,23 @@ pub fn install() -> Result<String> {
     let backup_copy = NamedTempFile::new_in(parent)?;
     fs::copy(&config, backup_copy.path())?;
     backup_copy.persist_noclobber(&backup)?;
+    if current_bindings.is_some() {
+        let backup_copy = NamedTempFile::new_in(parent)?;
+        fs::copy(&target, backup_copy.path())?;
+        backup_copy
+            .persist_noclobber(parent.join(format!("hype-flow.kdl.hype-flow-backup-{stamp}")))?;
+    }
 
+    let previous = temporary.path().join("previous-bindings.kdl");
+    if current_bindings.is_some() {
+        fs::hard_link(&target, &previous)?;
+    }
     if included {
-        fs::rename(generated, target)?;
+        fs::rename(generated, &target)?;
     } else {
         let updated = temporary.path().join("config.kdl");
         fs::write(&updated, format!("{original}\n{include}\n"))?;
         fs::set_permissions(&updated, fs::metadata(&config)?.permissions())?;
-        let previous = temporary.path().join("previous-bindings.kdl");
-        if current_bindings.is_some() {
-            fs::hard_link(&target, &previous)?;
-        }
         fs::rename(generated, &target)?;
         if let Err(error) = fs::rename(updated, &config) {
             let rollback = if current_bindings.is_some() {
@@ -204,5 +307,35 @@ pub fn install() -> Result<String> {
             return Err(error).context("Could not activate shortcuts");
         }
     }
-    Ok("Shortcuts ready. Super + Ctrl + Space starts dictation. A backup of your niri config was saved.".to_owned())
+    if let Err(error) = if changes.is_some() {
+        values.save()
+    } else {
+        Ok(())
+    } {
+        let rollback = (|| -> Result<()> {
+            if current_bindings.is_some() {
+                fs::rename(&previous, &target)?;
+            } else {
+                fs::remove_file(&target)?;
+            }
+            if !included {
+                let restore = temporary.path().join("restore-config.kdl");
+                fs::copy(&backup, &restore)?;
+                fs::rename(restore, &config)?;
+            }
+            Ok(())
+        })();
+        if let Err(rollback) = rollback {
+            let location = temporary.keep();
+            bail!(
+                "Could not save settings: {error}. Shortcut rollback failed: {rollback}. Files saved in {}",
+                location.display()
+            );
+        }
+        return Err(error).context("Could not save settings; previous shortcuts restored");
+    }
+    Ok(format!(
+        "Shortcuts ready. {} starts dictation. A backup of your niri config was saved.",
+        keys[0]
+    ))
 }
