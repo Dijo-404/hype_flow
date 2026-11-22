@@ -41,6 +41,62 @@ fn terminal_matching_checks_short_names_as_words() {
 }
 
 #[test]
+fn code_editors_use_the_openwhispr_shift_insert_route() {
+    for app in [
+        "code",
+        "Code - Insiders",
+        "code-oss",
+        "com.microsoft.VSCode",
+        "cursor",
+        "VSCodium",
+    ] {
+        assert!(output::use_shift_insert(app), "{app}");
+    }
+    for app in [
+        "firefox",
+        "Alacritty",
+        "org.example.decode",
+        "my-code-editor",
+        "",
+    ] {
+        assert!(!output::use_shift_insert(app), "{app}");
+    }
+}
+
+#[test]
+fn shortcuts_normalize_and_reject_unsafe_or_duplicate_bindings() {
+    assert_eq!(shortcuts::normalize(" alt + space ").unwrap(), "Alt+Space");
+    assert_eq!(
+        shortcuts::normalize("Shift+Control+Escape").unwrap(),
+        "Ctrl+Shift+Escape"
+    );
+    assert_eq!(shortcuts::normalize("Super+Space").unwrap(), "Super+Space");
+    for invalid in [
+        "",
+        "Space",
+        "Alt+",
+        "Alt+Ctrl",
+        "Ctrl+Control+Space",
+        "Alt+Space\nspawn",
+        "Alt+Space { quit; }",
+    ] {
+        assert!(shortcuts::normalize(invalid).is_err(), "{invalid:?}");
+    }
+    let values = Config {
+        dictation_shortcut: "Alt+Space".into(),
+        cancel_shortcut: "alt + space".into(),
+        ..Config::default()
+    };
+    assert!(
+        values
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("different")
+    );
+}
+
+#[test]
 fn services_use_isolated_environment() {
     if let Some(root) = env::var_os("HYPE_FLOW_TEST_SERVICES") {
         exercise_services(Path::new(&root));
@@ -92,21 +148,27 @@ fn exercise_services(root: &Path) {
     );
     executable(
         &bin.join("wl-paste"),
-        r#"if [ ! -f "$HOME/clipboard" ]; then echo 'Nothing is copied' >&2; exit 1; fi
+        r#"selection_file="$HOME/clipboard"
+        if [ "$1" = --primary ]; then selection_file="$HOME/primary"; shift; fi
+        if [ ! -f "$selection_file" ]; then echo 'Nothing is copied' >&2; exit 1; fi
         case "$*" in
         --list-types) printf 'image/png\ntext/plain;charset=utf-8\n' ;;
-        '--no-newline --type text'|'--no-newline --type text/plain;charset=utf-8') cat "$HOME/clipboard" ;;
+        '--no-newline --type text'|'--no-newline --type text/plain;charset=utf-8') cat "$selection_file" ;;
         *) exit 2 ;;
         esac"#,
     );
     executable(
         &bin.join("wl-copy"),
         r#"[ "$CLIPBOARD_STATE" = sensitive ] || exit 1
-        if [ "$1" != --clear ]; then [ "$1" = --sensitive ] || exit 4; shift; fi
+        sensitive=0
+        if [ "$1" = --sensitive ]; then sensitive=1; shift; fi
+        selection_file="$HOME/clipboard"
+        if [ "$1" = --primary ]; then selection_file="$HOME/primary"; shift; fi
+        if [ "$1" != --clear ]; then [ "$sensitive" = 1 ] || exit 4; fi
         case "$*" in
-        --clear) rm -f "$HOME/clipboard" ;;
+        --clear) rm -f "$selection_file" ;;
         '--type text/plain;charset=utf-8')
-            cat > "$HOME/clipboard"
+            cat > "$selection_file"
             if [ -f "$HOME/held-stderr" ]; then
                 (while [ -f "$HOME/held-stderr" ]; do sleep 0.02; done) </dev/null >/dev/null &
             fi ;;
@@ -141,6 +203,64 @@ fn exercise_services(root: &Path) {
     output::deliver("second rapid paste", Some(&firefox), true, false, false).unwrap();
     output::finish_pending();
     assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
+
+    let code = json!({"id": 1, "app_id": "com.microsoft.VSCode"});
+    let primary = root.join("primary");
+    fs::write(&primary, "previous primary").unwrap();
+    output::deliver("Codex webview text", Some(&code), true, false, false).unwrap();
+    assert_eq!(fs::read_to_string(&primary).unwrap(), "Codex webview text");
+    assert!(
+        fs::read_to_string(&typing)
+            .unwrap()
+            .ends_with("-M shift -k Insert -m shift\n")
+    );
+    output::deliver("rapid Codex text", Some(&code), true, false, false).unwrap();
+    output::finish_pending();
+    assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
+    assert_eq!(fs::read_to_string(&primary).unwrap(), "previous primary");
+    output::deliver("keep newer selection", Some(&code), true, false, false).unwrap();
+    fs::write(&primary, "copied separately in primary").unwrap();
+    output::finish_pending();
+    assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
+    assert_eq!(
+        fs::read_to_string(&primary).unwrap(),
+        "copied separately in primary"
+    );
+    output::deliver("manual primary copy", Some(&code), true, false, false).unwrap();
+    output::copy_text("explicit primary copy", true).unwrap();
+    output::finish_pending();
+    assert_eq!(
+        fs::read_to_string(&primary).unwrap(),
+        "explicit primary copy"
+    );
+    fs::write(&primary, "primary before failed keyboard").unwrap();
+    executable(&bin.join("wtype"), "exit 1");
+    assert!(output::deliver("failed Code paste", Some(&code), true, false, false).is_err());
+    output::finish_pending();
+    assert_eq!(
+        fs::read_to_string(&primary).unwrap(),
+        "primary before failed keyboard"
+    );
+    assert!(
+        output::deliver_until(
+            "cancel Code before keys",
+            Some(&code),
+            true,
+            false,
+            false,
+            || fs::read_to_string(&primary).is_ok_and(|value| value == "cancel Code before keys")
+        )
+        .is_err()
+    );
+    output::finish_pending();
+    assert_eq!(
+        fs::read_to_string(&primary).unwrap(),
+        "primary before failed keyboard"
+    );
+    executable(
+        &bin.join("wtype"),
+        r#"printf '%s\n' "$*" >> "$HOME/typing""#,
+    );
     fs::remove_file(&typing).unwrap();
     let began = Instant::now();
     assert!(
@@ -299,6 +419,13 @@ fn exercise_services(root: &Path) {
         "binds { Mod+Shift+D { spawn \"test\"; }; }\n",
     )
     .unwrap();
+    let preferences = root.join("config/hype-flow/config.toml");
+    fs::create_dir_all(&preferences).unwrap();
+    let original_config = fs::read_to_string(&config).unwrap();
+    assert!(shortcuts::save(&Config::default()).is_err());
+    assert_eq!(fs::read_to_string(&config).unwrap(), original_config);
+    assert!(!bindings.exists());
+    fs::remove_dir(&preferences).unwrap();
     shortcuts::install().unwrap();
     shortcuts::install().unwrap();
     assert_eq!(
@@ -314,6 +441,46 @@ fn exercise_services(root: &Path) {
             .to_string_lossy()
             .starts_with("config.kdl.hype-flow-backup-")
     }));
+
+    let mut values = Config {
+        dictation_shortcut: "Alt+Space".into(),
+        ..Config::default()
+    };
+    let original_bindings = fs::read_to_string(&bindings).unwrap();
+    fs::create_dir_all(&preferences).unwrap();
+    assert!(shortcuts::save(&values).is_err());
+    assert_eq!(fs::read_to_string(&bindings).unwrap(), original_bindings);
+    fs::remove_dir(&preferences).unwrap();
+    shortcuts::save(&values).unwrap();
+    assert_eq!(Config::load().unwrap().dictation_shortcut, "Alt+Space");
+    let installed = fs::read_to_string(&bindings).unwrap();
+    shortcuts::install().unwrap();
+    assert_eq!(fs::read_to_string(&bindings).unwrap(), installed);
+    assert!(installed.contains("Alt+Space"));
+    assert!(!installed.contains("Mod+Ctrl+Space"));
+    assert!(installed.contains("Mod+Ctrl+Escape"));
+    assert!(fs::read_dir(&niri).unwrap().flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("hype-flow.kdl.hype-flow-backup-")
+            && fs::read_to_string(entry.path()).is_ok_and(|text| text == original_bindings)
+    }));
+    fs::write(
+        niri.join("keys.kdl"),
+        "binds { Alt+F9 { spawn \"test\"; }; }\n",
+    )
+    .unwrap();
+    let saved_preferences = fs::read(&preferences).unwrap();
+    values.dictation_shortcut = "Alt+F9".into();
+    assert!(
+        shortcuts::save(&values)
+            .unwrap_err()
+            .to_string()
+            .contains("keys.kdl")
+    );
+    assert_eq!(fs::read(&preferences).unwrap(), saved_preferences);
+    assert_eq!(fs::read_to_string(&bindings).unwrap(), installed);
 
     executable(
         &bin.join("playerctl"),

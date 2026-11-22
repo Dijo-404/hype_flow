@@ -217,6 +217,8 @@ fn check_config_paths(root: &std::path::Path) {
     );
     assert_eq!(defaults.language, "en");
     assert_eq!(defaults.unload_minutes, 10);
+    assert_eq!(defaults.dictation_shortcut, "Mod+Ctrl+Space");
+    assert_eq!(defaults.cancel_shortcut, "Mod+Ctrl+Escape");
     assert_eq!(
         (defaults.boost_score, defaults.fuzzy_tolerance),
         (1.5, 0.18)

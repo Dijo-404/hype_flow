@@ -57,7 +57,15 @@ static SELECTION: Mutex<Selection> = Mutex::new(Selection {
     generation: 0,
     pending: None,
 });
+static PRIMARY: Mutex<Selection> = Mutex::new(Selection {
+    generation: 0,
+    pending: None,
+});
 static RESTORERS: Mutex<Vec<thread::JoinHandle<()>>> = Mutex::new(Vec::new());
+
+fn selection_state(primary: bool) -> &'static Mutex<Selection> {
+    if primary { &PRIMARY } else { &SELECTION }
+}
 
 pub fn focused_window() -> Option<Value> {
     let output = run_command(
@@ -85,6 +93,25 @@ pub fn is_terminal(app_id: &str) -> bool {
                 .any(|word| word == *name)
         }
     })
+}
+
+pub fn use_shift_insert(app_id: &str) -> bool {
+    // OpenWhispr routes VS Code/Cursor away from Ctrl+V, including their embedded chat and terminal inputs.
+    matches!(
+        app_id.to_ascii_lowercase().as_str(),
+        "code"
+            | "code-insiders"
+            | "code - insiders"
+            | "code-oss"
+            | "code - oss"
+            | "com.microsoft.vscode"
+            | "com.microsoft.vscodeinsiders"
+            | "cursor"
+            | "com.todesktop.230313mzl4w4u92"
+            | "codium"
+            | "vscodium"
+            | "com.vscodium.codium"
+    )
 }
 
 fn window_id(window: &Value) -> Option<u64> {
@@ -125,17 +152,15 @@ fn write_clipboard(args: &[&str], data: Option<&[u8]>) -> Result<()> {
 }
 
 fn copy_selection(text: &str, primary: bool) -> Result<()> {
-    let args = ["--type", TEXT_MIME, "--primary"];
-    write_clipboard(&args[..if primary { 3 } else { 2 }], Some(text.as_bytes()))
+    let args = ["--primary", "--type", TEXT_MIME];
+    write_clipboard(&args[if primary { 0 } else { 1 }..], Some(text.as_bytes()))
 }
 
 pub fn copy_text(text: &str, primary: bool) -> Result<()> {
-    let mut selection = SELECTION.lock().unwrap_or_else(|error| error.into_inner());
-    copy_selection(text, primary)?;
-    if !primary {
-        selection.generation = selection.generation.wrapping_add(1);
-        selection.pending = None;
-    }
+    let mut selection = selection_state(primary)
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    replace_selection(text, primary, false, &mut selection)?;
     Ok(())
 }
 
@@ -144,9 +169,13 @@ enum Clipboard {
     Content(String, Vec<u8>),
 }
 
-fn read_selection(kind: &str) -> Option<Vec<u8>> {
+fn read_selection(kind: &str, primary: bool) -> Option<Vec<u8>> {
+    let mut command = Command::new("wl-paste");
+    if primary {
+        command.arg("--primary");
+    }
     let output = run_command(
-        Command::new("wl-paste").args(["--no-newline", "--type", kind]),
+        command.args(["--no-newline", "--type", kind]),
         None,
         Duration::from_secs(1),
     )
@@ -154,11 +183,13 @@ fn read_selection(kind: &str) -> Option<Vec<u8>> {
     (output.status.success() && output.stdout.len() <= CLIPBOARD_LIMIT).then_some(output.stdout)
 }
 
-fn previous_selection() -> Option<Clipboard> {
+fn previous_selection(primary: bool) -> Option<Clipboard> {
+    let mut command = Command::new("wl-paste");
+    if primary {
+        command.arg("--primary");
+    }
     let listing = run_command(
-        Command::new("wl-paste")
-            .args(["--list-types"])
-            .env("LC_ALL", "C"),
+        command.args(["--list-types"]).env("LC_ALL", "C"),
         None,
         Duration::from_secs(1),
     )
@@ -175,15 +206,47 @@ fn previous_selection() -> Option<Clipboard> {
     else {
         return Some(Clipboard::Empty);
     };
-    let data = read_selection(kind)?;
+    let data = read_selection(kind, primary)?;
     Some(Clipboard::Content(kind.to_owned(), data))
 }
 
-fn still_selected(transcript: &str) -> bool {
-    read_selection("text").as_deref() == Some(transcript.as_bytes())
+fn still_selected(transcript: &str, primary: bool) -> bool {
+    read_selection("text", primary).as_deref() == Some(transcript.as_bytes())
 }
 
-fn restore_after_paste(previous: Option<Clipboard>, transcript: String, selection: &mut Selection) {
+fn replace_selection(
+    text: &str,
+    primary: bool,
+    preserve: bool,
+    selection: &mut Selection,
+) -> Result<Option<Clipboard>> {
+    let inherited = preserve
+        && selection
+            .pending
+            .as_ref()
+            .is_some_and(|pending| still_selected(&pending.transcript, primary));
+    let previous = if preserve && !inherited {
+        previous_selection(primary)
+    } else {
+        None
+    };
+    copy_selection(text, primary)?;
+    let previous = if inherited {
+        selection.pending.take().map(|pending| pending.original)
+    } else {
+        previous
+    };
+    selection.pending = None;
+    selection.generation = selection.generation.wrapping_add(1);
+    Ok(previous)
+}
+
+fn restore_after_paste(
+    previous: Option<Clipboard>,
+    transcript: String,
+    selection: &mut Selection,
+    primary: bool,
+) {
     let Some(previous) = previous else { return };
     let generation = selection.generation;
     selection.pending = Some(Pending {
@@ -193,7 +256,9 @@ fn restore_after_paste(previous: Option<Clipboard>, transcript: String, selectio
     });
     let handle = thread::spawn(move || {
         thread::sleep(RESTORE_DELAY);
-        let mut selection = SELECTION.lock().unwrap_or_else(|error| error.into_inner());
+        let mut selection = selection_state(primary)
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if selection
             .pending
             .as_ref()
@@ -202,12 +267,18 @@ fn restore_after_paste(previous: Option<Clipboard>, transcript: String, selectio
             return;
         }
         let pending = selection.pending.take().expect("matching pending restore");
-        if !still_selected(&pending.transcript) {
+        if !still_selected(&pending.transcript, primary) {
             return;
         }
         let _ = match pending.original {
-            Clipboard::Empty => write_clipboard(&["--clear"], None),
-            Clipboard::Content(kind, data) => write_clipboard(&["--type", &kind], Some(&data)),
+            Clipboard::Empty => {
+                let args = ["--primary", "--clear"];
+                write_clipboard(&args[if primary { 0 } else { 1 }..], None)
+            }
+            Clipboard::Content(kind, data) => {
+                let args = ["--primary", "--type", &kind];
+                write_clipboard(&args[if primary { 0 } else { 1 }..], Some(&data))
+            }
         };
     });
     let mut restorers = RESTORERS.lock().unwrap_or_else(|error| error.into_inner());
@@ -263,26 +334,9 @@ pub fn deliver_until(
     }
     let mut selection = SELECTION.lock().unwrap_or_else(|error| error.into_inner());
     ensure!(!cancelled(), "Clipboard delivery cancelled");
-    let inherited = paste
-        && selection
-            .pending
-            .as_ref()
-            .is_some_and(|pending| still_selected(&pending.transcript));
-    let previous = if paste && !inherited {
-        previous_selection()
-    } else {
-        None
-    };
-    copy_selection(&transcript, false)?;
-    let previous = if inherited {
-        selection.pending.take().map(|pending| pending.original)
-    } else {
-        previous
-    };
-    selection.pending = None;
-    selection.generation = selection.generation.wrapping_add(1);
+    let previous = replace_selection(&transcript, false, paste, &mut selection)?;
     if !paste {
-        copy_selection(&transcript, true)?;
+        copy_text(&transcript, true)?;
         return Ok("Copied".to_owned());
     }
     // The compositor must release the shortcut modifiers before synthesized keys.
@@ -290,23 +344,42 @@ pub fn deliver_until(
     ensure!(!cancelled(), "Clipboard delivery cancelled");
     let id = target.and_then(window_id);
     if !id.is_some_and(|id| same_focus(id) || refocus(id)) {
-        copy_selection(&transcript, true)?;
+        copy_text(&transcript, true)?;
         return Ok("Copied · focus changed".to_owned());
     }
-    if !still_selected(&transcript) {
-        copy_selection(&transcript, true)?;
+    if !still_selected(&transcript, false) {
+        copy_text(&transcript, true)?;
         return Ok("Copied · clipboard changed".to_owned());
     }
     if !id.is_some_and(same_focus) {
-        copy_selection(&transcript, true)?;
+        copy_text(&transcript, true)?;
         return Ok("Copied · focus changed".to_owned());
     }
     ensure!(!cancelled(), "Clipboard delivery cancelled");
-    let terminal = target
+    let app_id = target
         .and_then(|window| window.get("app_id"))
         .and_then(Value::as_str)
-        .is_some_and(is_terminal);
-    if terminal {
+        .unwrap_or_default();
+    let terminal = is_terminal(app_id);
+    if use_shift_insert(app_id) {
+        let mut primary = PRIMARY.lock().unwrap_or_else(|error| error.into_inner());
+        let previous_primary = replace_selection(&transcript, true, true, &mut primary)?;
+        let pasted: Result<bool> = (|| {
+            ensure!(!cancelled(), "Clipboard delivery cancelled");
+            if !still_selected(&transcript, true)
+                || !still_selected(&transcript, false)
+                || !id.is_some_and(same_focus)
+            {
+                return Ok(false);
+            }
+            type_keys(&["-M", "shift", "-k", "Insert", "-m", "shift"], &cancelled)?;
+            Ok(true)
+        })();
+        restore_after_paste(previous_primary, transcript.clone(), &mut primary, true);
+        if !pasted? {
+            return Ok("Copied · paste target changed".to_owned());
+        }
+    } else if terminal {
         type_keys(
             &[
                 "-M", "ctrl", "-M", "shift", "-P", "v", "-p", "v", "-m", "shift", "-m", "ctrl",
@@ -319,7 +392,7 @@ pub fn deliver_until(
             &cancelled,
         )?;
     }
-    restore_after_paste(previous, transcript, &mut selection);
+    restore_after_paste(previous, transcript, &mut selection, false);
     let submitted = if press_enter && !terminal {
         thread::sleep(Duration::from_millis(50));
         if !cancelled() && id.is_some_and(same_focus) && !cancelled() {

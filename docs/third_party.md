@@ -14,6 +14,8 @@ The reference disables hotword boosting for Parakeet Unified because its benefit
 
 Text cleanup is local Rust processing, ported from the retained Python reference: configured corrections, vocabulary capitalization, explicit word filters, and optional adjacent repeated-word removal. It adds no model or spelling dependency. Corrections and default filler filtering are enabled; repeated-word removal is disabled. The original pre-cleanup result remains separately recoverable.
 
+Linux paste routing also follows `src/helpers/clipboard.js` at the reference commit above: VS Code and Cursor use Shift+Insert with the transcript available in both clipboard selections. Hype Flow restores each selection independently and retains its cancellation and focus checks. This route also covers VSCodium.
+
 The settings window adapts `src/index.css`, `ControlPanelSidebar.tsx`, and `ui/SettingsSection.tsx`: sidebar navigation, charcoal surfaces, blue accents, and compact panels. It uses installed Noto Sans rather than the proprietary brand fonts.
 
 OpenWhispr's MIT license: [licenses/openwhispr.txt](licenses/openwhispr.txt).

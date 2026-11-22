@@ -4,6 +4,8 @@ language = "en"
 input_target = "auto"
 paste = true
 threads = 4
+dictation_shortcut = "Alt+Space"
+cancel_shortcut = "Mod+Ctrl+Escape"
 # Model files and runtime installed by the app:
 # model = "/absolute/path/to/parakeet-unified-en-int8"
 # server = "/absolute/path/to/backend/parakeet/recognizer"
