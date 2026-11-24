@@ -40,7 +40,7 @@ class CleanupTests(unittest.TestCase):
         values = {"auto_correct": False, "filter_words": False, "remove_repetitions": False,
                   "corrections": "open ai => OpenAI"}
         self.assertEqual(process(text, values), text)
-        self.assertEqual(process("...", values), "...")
+        self.assertEqual(process("...", values), "")
 
     def test_repetitions_are_only_removed_when_enabled(self):
         self.assertEqual(process("the the thing", {}), "the the thing")
@@ -50,3 +50,12 @@ class CleanupTests(unittest.TestCase):
         for rules in ("invalid", "word => ", " => word", "one => a\nONE => b", ". => end"):
             with self.subTest(rules=rules), self.assertRaises(ValueError):
                 corrections(rules)
+
+
+class CleanupFixtureTests(unittest.TestCase):
+    def test_shared_rust_python_fixtures(self):
+        import json
+        from pathlib import Path
+        for case in json.loads(Path(__file__).with_name("fixtures").joinpath("cleanup.json").read_text()):
+            with self.subTest(text=case["input"]):
+                self.assertEqual(process(case["input"], case["settings"]), case["output"])

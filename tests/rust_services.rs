@@ -142,6 +142,10 @@ fn exercise_services(root: &Path) {
             printf '{"id":%s,"app_id":"firefox"}' "$5" > "$HOME/focus" ;;
         validate:--config:*)
             grep -q broken "$3" && { echo 'bad config' >&2; exit 1; }
+            staged=$(sed -n 's/^include "\(.*\/bindings.kdl\)"$/\1/p' "$3")
+            if [ -f "$HOME/reject-hold" ] && grep -q 'press {' "$staged"; then
+                echo 'press/release unavailable' >&2; exit 1
+            fi
             grep -Eq '^include ".*/bindings.kdl"$' "$3" ;;
         *) exit 2 ;;
         esac"#,
@@ -459,6 +463,25 @@ fn exercise_services(root: &Path) {
     assert!(installed.contains("Alt+Space"));
     assert!(!installed.contains("Mod+Ctrl+Space"));
     assert!(installed.contains("Mod+Ctrl+Escape"));
+    let saved_toggle_preferences = fs::read(&preferences).unwrap();
+    fs::write(root.join("reject-hold"), "unsupported compositor").unwrap();
+    values.dictation_mode = "hold".into();
+    assert!(
+        shortcuts::save(&values)
+            .unwrap_err()
+            .to_string()
+            .contains("Push-to-talk requires niri")
+    );
+    assert_eq!(fs::read_to_string(&bindings).unwrap(), installed);
+    assert_eq!(fs::read(&preferences).unwrap(), saved_toggle_preferences);
+    fs::remove_file(root.join("reject-hold")).unwrap();
+    shortcuts::save(&values).unwrap();
+    let held = fs::read_to_string(&bindings).unwrap();
+    assert!(held.contains("dev.hype.Flow press") && held.contains("dev.hype.Flow release"));
+    assert_eq!(Config::load().unwrap().dictation_mode, "hold");
+    values.dictation_mode = "toggle".into();
+    shortcuts::save(&values).unwrap();
+    assert_eq!(fs::read_to_string(&bindings).unwrap(), installed);
     assert!(fs::read_dir(&niri).unwrap().flatten().any(|entry| {
         entry
             .file_name()
@@ -533,13 +556,13 @@ fn cached_worker_version_and_audio_assets_are_required() {
     }
     executable(&worker, "exit 0");
     let version = worker.with_file_name("recognizer.version");
-    fs::write(&version, "4\n").unwrap();
+    fs::write(&version, format!("{}\n", setup::NATIVE_VERSION)).unwrap();
     assert!(!setup::assets_ready(&values));
     fs::write(model.parent().unwrap().join("silero_vad.onnx"), []).unwrap();
     assert!(!setup::assets_ready(&values));
     fs::write(model.parent().unwrap().join("gtcrn_simple.onnx"), []).unwrap();
     fs::write(&version, "3\n").unwrap();
     assert!(!setup::assets_ready(&values));
-    fs::write(&version, "4\n").unwrap();
+    fs::write(&version, format!("{}\n", setup::NATIVE_VERSION)).unwrap();
     assert!(setup::assets_ready(&values));
 }

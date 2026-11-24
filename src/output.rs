@@ -4,7 +4,14 @@ use crate::{
 };
 use anyhow::{Result, ensure};
 use serde_json::Value;
-use std::{process::Command, sync::Mutex, thread, time::Duration};
+use std::{
+    fs::{self, File},
+    os::fd::AsRawFd,
+    process::Command,
+    sync::Mutex,
+    thread,
+    time::{Duration, Instant},
+};
 
 // OpenWhispr's Linux terminal classes use Ctrl+Shift+V instead of Ctrl+V.
 const TERMINALS: &[&str] = &[
@@ -40,6 +47,7 @@ const TERMINALS: &[&str] = &[
     "stterm",
 ];
 const RESTORE_DELAY: Duration = Duration::from_millis(800);
+const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(3);
 const CLIPBOARD_LIMIT: usize = 32 * 1024 * 1024;
 const TEXT_MIME: &str = "text/plain;charset=utf-8";
 struct Selection {
@@ -142,7 +150,7 @@ fn write_clipboard(args: &[&str], data: Option<&[u8]>) -> Result<()> {
         command.arg("--sensitive");
     }
     // wl-copy keeps stderr open in the daemon that owns the clipboard.
-    let output = run_command_without_stderr(command.args(args), data, Duration::from_secs(3))?;
+    let output = run_command_without_stderr(command.args(args), data, CLIPBOARD_TIMEOUT)?;
     ensure!(
         output.status.success(),
         "wl-copy failed with {}",
@@ -177,7 +185,7 @@ fn read_selection(kind: &str, primary: bool) -> Option<Vec<u8>> {
     let output = run_command(
         command.args(["--no-newline", "--type", kind]),
         None,
-        Duration::from_secs(1),
+        CLIPBOARD_TIMEOUT,
     )
     .ok()?;
     (output.status.success() && output.stdout.len() <= CLIPBOARD_LIMIT).then_some(output.stdout)
@@ -191,7 +199,7 @@ fn previous_selection(primary: bool) -> Option<Clipboard> {
     let listing = run_command(
         command.args(["--list-types"]).env("LC_ALL", "C"),
         None,
-        Duration::from_secs(1),
+        CLIPBOARD_TIMEOUT,
     )
     .ok()?;
     if !listing.status.success() {
@@ -309,6 +317,99 @@ fn type_keys(args: &[&str], cancelled: &impl Fn() -> bool) -> Result<()> {
     Ok(())
 }
 
+const KEY_BITMAP_BYTES: usize = 96;
+const MODIFIER_KEYS: &[usize] = &[29, 42, 54, 56, 97, 100, 125, 126];
+
+fn key_pressed(bitmap: &[u8; KEY_BITMAP_BYTES], key: usize) -> bool {
+    bitmap[key / 8] & (1 << (key % 8)) != 0
+}
+
+fn keyboard_devices() -> Option<Vec<File>> {
+    let mut keyboards = Vec::new();
+    for entry in fs::read_dir("/dev/input").ok()? {
+        let entry = entry.ok()?;
+        if !entry.file_name().to_str()?.starts_with("event") {
+            continue;
+        }
+        // An unreadable device may be the active keyboard; retain the fixed wait.
+        let device = File::open(entry.path()).ok()?;
+        let mut supported = [0u8; KEY_BITMAP_BYTES];
+        // Linux EVIOCGBIT(EV_KEY, 96), read capabilities without consuming events.
+        if unsafe {
+            libc::ioctl(
+                device.as_raw_fd(),
+                0x80604521 as libc::c_ulong,
+                supported.as_mut_ptr(),
+            )
+        } < 0
+        {
+            return None;
+        }
+        if key_pressed(&supported, 30) && key_pressed(&supported, 44) && key_pressed(&supported, 28)
+        {
+            keyboards.push(device);
+        }
+    }
+    (!keyboards.is_empty()).then_some(keyboards)
+}
+
+fn modifiers_down(keyboards: &[File]) -> Option<bool> {
+    let mut held = false;
+    for device in keyboards {
+        let mut pressed = [0u8; KEY_BITMAP_BYTES];
+        // Linux EVIOCGKEY(96); this does not require grabbing the keyboard.
+        if unsafe {
+            libc::ioctl(
+                device.as_raw_fd(),
+                0x80604518 as libc::c_ulong,
+                pressed.as_mut_ptr(),
+            )
+        } < 0
+        {
+            return None;
+        }
+        held |= MODIFIER_KEYS.iter().any(|&key| key_pressed(&pressed, key));
+    }
+    Some(held)
+}
+
+fn wait_release(
+    probe: impl Fn() -> Option<bool>,
+    cancelled: &impl Fn() -> bool,
+    minimum: Duration,
+    maximum: Duration,
+    fallback: Duration,
+) -> Result<()> {
+    let started = Instant::now();
+    let mut readable = true;
+    loop {
+        ensure!(!cancelled(), "Clipboard delivery cancelled");
+        let held = if readable { probe() } else { None };
+        readable &= held.is_some();
+        let elapsed = started.elapsed();
+        if readable && elapsed >= minimum && held == Some(false) || !readable && elapsed >= fallback
+        {
+            return Ok(());
+        }
+        ensure!(
+            elapsed < maximum,
+            "Paste cancelled: shortcut modifiers are still pressed"
+        );
+        thread::sleep(Duration::from_millis(15));
+    }
+}
+
+fn wait_for_modifiers(enabled: bool, cancelled: &impl Fn() -> bool) -> Result<()> {
+    let keyboards = enabled.then(keyboard_devices).flatten();
+    wait_release(
+        || keyboards.as_deref().and_then(modifiers_down),
+        cancelled,
+        Duration::from_millis(50),
+        Duration::from_millis(1500),
+        Duration::from_millis(180),
+    )
+}
+
 pub fn deliver(
     text: &str,
     target: Option<&Value>,
@@ -327,6 +428,26 @@ pub fn deliver_until(
     press_enter: bool,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
+    deliver_guarded_until(
+        text,
+        target,
+        paste,
+        trailing_space,
+        press_enter,
+        false,
+        cancelled,
+    )
+}
+
+pub fn deliver_guarded_until(
+    text: &str,
+    target: Option<&Value>,
+    paste: bool,
+    trailing_space: bool,
+    press_enter: bool,
+    modifier_release_guard: bool,
+    cancelled: impl Fn() -> bool,
+) -> Result<String> {
     ensure!(!cancelled(), "Clipboard delivery cancelled");
     let mut transcript = text.to_owned();
     if trailing_space && !text.ends_with(whitespace) {
@@ -340,7 +461,7 @@ pub fn deliver_until(
         return Ok("Copied".to_owned());
     }
     // The compositor must release the shortcut modifiers before synthesized keys.
-    thread::sleep(Duration::from_millis(180));
+    wait_for_modifiers(modifier_release_guard, &cancelled)?;
     ensure!(!cancelled(), "Clipboard delivery cancelled");
     let id = target.and_then(window_id);
     if !id.is_some_and(|id| same_focus(id) || refocus(id)) {
@@ -410,4 +531,44 @@ pub fn deliver_until(
         "Pasted"
     }
     .to_owned())
+}
+
+#[cfg(test)]
+mod modifier_tests {
+    use super::*;
+
+    #[test]
+    fn modifier_bitmap_covers_both_sides_without_ordinary_keys() {
+        let mut bitmap = [0u8; KEY_BITMAP_BYTES];
+        bitmap[30 / 8] |= 1 << (30 % 8);
+        assert!(!MODIFIER_KEYS.iter().any(|&key| key_pressed(&bitmap, key)));
+        for &key in MODIFIER_KEYS {
+            bitmap[key / 8] |= 1 << (key % 8);
+            assert!(key_pressed(&bitmap, key));
+            bitmap[key / 8] &= !(1 << (key % 8));
+        }
+    }
+
+    #[test]
+    fn modifier_wait_requires_release_and_honors_cancellation() {
+        let timeout = Duration::from_millis(25);
+        assert!(wait_release(|| Some(true), &|| false, Duration::ZERO, timeout, timeout).is_err());
+        assert!(wait_release(|| Some(false), &|| true, Duration::ZERO, timeout, timeout).is_err());
+        assert!(wait_release(|| Some(false), &|| false, Duration::ZERO, timeout, timeout).is_ok());
+    }
+
+    #[test]
+    fn unreadable_keyboard_uses_fallback_wait() {
+        let started = Instant::now();
+        let fallback = Duration::from_millis(15);
+        wait_release(
+            || None,
+            &|| false,
+            Duration::ZERO,
+            Duration::from_secs(1),
+            fallback,
+        )
+        .unwrap();
+        assert!(started.elapsed() >= fallback);
+    }
 }

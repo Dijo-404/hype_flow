@@ -75,7 +75,7 @@ def main():
             (model / name).touch()
         for name in ("silero_vad.onnx", "gtcrn_simple.onnx"):
             (model.parent / name).touch()
-        (backend / "recognizer.version").write_text("4\n")
+        (backend / "recognizer.version").write_text("6\n")
         write_executable(backend / "recognizer", "#!" + sys.executable + "\n" + r'''
 import json, struct, sys, time
 def send(value):
@@ -113,11 +113,11 @@ if sys.argv[1:] == ["msg", "--json", "focused-window"] and os.path.exists(os.env
     time.sleep(0.4)
 os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
 ''')
-        (config / "config.toml").write_text('sounds = false\npause_media = false\nkeep_mic_ready = true\ncorrections = "open ai => OpenAI"\ndictation_shortcut = "Alt+Space"\n')
+        (config / "config.toml").write_text('recover_recordings = true\nsounds = false\npause_media = false\nkeep_mic_ready = true\ncorrections = "open ai => OpenAI"\ndictation_shortcut = "Alt+Space"\n')
         niri_config = root / "config/niri/config.kdl"
         niri_config.parent.mkdir(parents=True)
         niri_config.write_text('input { keyboard { xkb { layout "us"; }; }; }\n')
-        env = {**os.environ, "XDG_DATA_HOME": str(root / "data"), "XDG_CONFIG_HOME": str(root / "config"), "NIRI_CONFIG": str(niri_config), "PATH": str(fake) + ":" + os.environ["PATH"], "HYPE_TEST_PID_FILE": str(root / "capture-pids"), "HYPE_TEST_DELAY": str(root / "focus-delay")}
+        env = {**os.environ, "XDG_DATA_HOME": str(root / "data"), "XDG_CONFIG_HOME": str(root / "config"), "XDG_STATE_HOME": str(root / "state"), "NIRI_CONFIG": str(niri_config), "PATH": str(fake) + ":" + os.environ["PATH"], "HYPE_TEST_PID_FILE": str(root / "capture-pids"), "HYPE_TEST_DELAY": str(root / "focus-delay")}
         log = (root / "app.log").open("wb")
         app = subprocess.Popen([executable, "--background"], env=env, stdout=log, stderr=log, start_new_session=True)
         group = Gio.DBusActionGroup.get(Gio.bus_get_sync(Gio.BusType.SESSION, None), "dev.hype.Flow", "/dev/hype/Flow")
@@ -184,7 +184,10 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             wait(overlay_visible, "notch disappearance restores fallback")
             group.activate_action("toggle", None)
             wait(lambda: phase("done"), "transcript delivery")
-            wait(lambda: text() == "OpenAI hello.", "paste into original target")
+            try:
+                wait(lambda: text() == "OpenAI hello.", "paste into original target")
+            except AssertionError as error:
+                raise AssertionError(f"{error}. Status: {state()!r}, target text: {text()!r}") from error
             wait(lambda: subprocess.check_output(["wl-paste", "--no-newline"]) == b"previous clipboard", "clipboard restoration")
             runtime = Path(os.environ["XDG_RUNTIME_DIR"]) / "hype-flow"
             raw = runtime / "last-raw-transcript.txt"
@@ -196,6 +199,7 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             wait(lambda: subprocess.check_output(["wl-paste", "--no-newline"]) == b"um open ai hello.", "original recovery")
             group.activate_action("toggle", None)
             wait(lambda: phase("recording"), "second recording")
+            wait(lambda: state()[3] >= 0.35, "minimum recording duration before decode")
             group.activate_action("toggle", None)
             wait(lambda: phase("transcribing"), "second decode")
             group.activate_action("cancel", None)
@@ -236,6 +240,7 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
                 else:
                     group.activate_action("toggle", None)
                     wait(lambda: phase("recording"), "shutdown recording")
+                    wait(lambda: state()[3] >= 0.35, "minimum recording duration before delivery")
                     group.activate_action("toggle", None)
                     wait(lambda: phase("delivering"), "delivery before shutdown")
                 group.activate_action("quit", None)
@@ -252,6 +257,7 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
                     process = Path("/proc") / pid
                     assert not process.exists() or process.joinpath("stat").read_text().split(") ", 1)[1].startswith("Z"), "Microphone child survived " + scenario
                 assert not raw.exists() and not cleaned.exists()
+                assert not list((root / "state/hype-flow/spool").glob("*.pcm")), "Cancelled recording survived shutdown"
                 log.close()
                 print("Rust desktop regression: " + scenario + " passed")
         finally:

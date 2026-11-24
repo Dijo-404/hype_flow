@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::process::{CHILD_GRACE, ChildGroup, nonblocking, run_command_until, wait_for_io};
-use crate::segments::split_at_pauses;
+use crate::segments::split_at_pauses_with_limit;
 use crate::setup::MODEL_FILES;
 use crate::vocabulary::hotwords;
 use anyhow::{Context, Result, bail, ensure};
@@ -68,6 +68,186 @@ pub fn read_wav(path: &Path) -> Result<Vec<u8>> {
         pcm.extend_from_slice(&sample?.to_le_bytes());
     }
     Ok(pcm)
+}
+
+/// A recognized word with conservative minimum token confidence.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct WordConfidence {
+    pub text: String,
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub min_log_probability: f64,
+    pub duration_is_reliable: bool,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct Transcription {
+    pub text: String,
+    pub audio_seconds: f64,
+    pub words: Vec<WordConfidence>,
+    pub anomaly_score: f64,
+}
+
+impl Transcription {
+    pub fn append(&mut self, mut other: Self, offset_seconds: f64) {
+        if !self.text.is_empty() && !other.text.is_empty() {
+            self.text.push(' ');
+        }
+        self.text.push_str(&other.text);
+        self.audio_seconds = self.audio_seconds.max(offset_seconds + other.audio_seconds);
+        for word in &mut other.words {
+            word.start_seconds += offset_seconds;
+            word.end_seconds += offset_seconds;
+        }
+        self.words.extend(other.words);
+        self.anomaly_score = anomaly_score(&self.words);
+    }
+}
+
+fn anomaly_score(words: &[WordConfidence]) -> f64 {
+    // faster-whisper's word probability/duration anomaly heuristic; opt-in only.
+    words
+        .iter()
+        .take(8)
+        .map(|word| {
+            let duration = (word.end_seconds - word.start_seconds).max(0.0);
+            f64::from(word.min_log_probability.exp() < 0.15)
+                + if word.duration_is_reliable && duration < 0.133 {
+                    (0.133 - duration) * 15.0
+                } else {
+                    0.0
+                }
+                + if word.duration_is_reliable && duration > 2.0 {
+                    duration - 2.0
+                } else {
+                    0.0
+                }
+        })
+        .sum()
+}
+
+fn transcription(response: &Value, audio_seconds: f64) -> Result<Transcription> {
+    let text = response
+        .get("text")
+        .and_then(Value::as_str)
+        .context("Speech backend returned no transcript")?
+        .split(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut result = Transcription {
+        text,
+        audio_seconds,
+        ..Default::default()
+    };
+    if let Some(chunks) = response.get("chunks").and_then(Value::as_array) {
+        for chunk in chunks {
+            let offset = chunk
+                .get("audio_offset_seconds")
+                .and_then(Value::as_f64)
+                .filter(|offset| offset.is_finite() && *offset >= 0.0)
+                .unwrap_or(0.0);
+            let duration = chunk
+                .get("audio_duration_seconds")
+                .and_then(Value::as_f64)
+                .filter(|duration| {
+                    duration.is_finite()
+                        && *duration >= 0.0
+                        && offset + duration <= audio_seconds + 0.1
+                });
+            // Older workers omit per-piece duration; never invent a confidence range.
+            let Some(duration) = duration else {
+                continue;
+            };
+            let decoded = transcription(&chunk["result"], duration)?;
+            result
+                .words
+                .extend(decoded.words.into_iter().map(|mut word| {
+                    word.start_seconds += offset;
+                    word.end_seconds += offset;
+                    word
+                }));
+        }
+    } else if let (Some(tokens), Some(times), Some(probabilities)) = (
+        response.get("tokens").and_then(Value::as_array),
+        response.get("timestamps").and_then(Value::as_array),
+        response.get("ys_log_probs").and_then(Value::as_array),
+    ) && tokens.len() == times.len()
+        && tokens.len() == probabilities.len()
+    {
+        let mut previous_time = 0.0;
+        let mut valid = true;
+        for index in 0..tokens.len() {
+            let Some(token) = tokens[index].as_str() else {
+                valid = false;
+                break;
+            };
+            let Some(time) = times[index]
+                .as_f64()
+                .filter(|t| t.is_finite() && *t >= previous_time && *t <= audio_seconds + 0.1)
+            else {
+                valid = false;
+                break;
+            };
+            let Some(log_probability) = probabilities[index]
+                .as_f64()
+                .filter(|p| p.is_finite() && *p <= 0.0)
+            else {
+                valid = false;
+                break;
+            };
+            previous_time = time;
+            let native_duration = response
+                .get("durations")
+                .and_then(Value::as_array)
+                .and_then(|durations| durations.get(index))
+                .and_then(Value::as_f64)
+                .filter(|duration| {
+                    duration.is_finite()
+                        && *duration >= 0.0
+                        && time + duration <= audio_seconds + 0.1
+                });
+            let duration_is_reliable = native_duration.is_some()
+                && response
+                    .get("durations_reliable")
+                    .and_then(Value::as_array)
+                    .is_none_or(|flags| flags.get(index).and_then(Value::as_bool) == Some(true));
+            let end = native_duration
+                .map(|duration| time + duration)
+                .unwrap_or_else(|| {
+                    times
+                        .get(index + 1)
+                        .and_then(Value::as_f64)
+                        .unwrap_or(audio_seconds)
+                })
+                .max(time)
+                .min(audio_seconds.max(time));
+            let begins_word = token.starts_with('▁') || token.starts_with(char::is_whitespace);
+            let token = token.trim_start_matches('▁').trim();
+            if token.is_empty() {
+                continue;
+            }
+            if begins_word || result.words.is_empty() {
+                result.words.push(WordConfidence {
+                    text: token.to_owned(),
+                    start_seconds: time,
+                    end_seconds: end,
+                    min_log_probability: log_probability,
+                    duration_is_reliable,
+                });
+            } else if let Some(word) = result.words.last_mut() {
+                word.text.push_str(token);
+                word.end_seconds = end;
+                word.min_log_probability = word.min_log_probability.min(log_probability);
+                word.duration_is_reliable &= duration_is_reliable;
+            }
+        }
+        if !valid {
+            result.words.clear();
+        }
+    }
+    result.anomaly_score = anomaly_score(&result.words);
+    Ok(result)
 }
 
 struct Worker {
@@ -180,10 +360,24 @@ impl Engine {
         epoch & 1 != 0 || self.epoch.load(Ordering::SeqCst) != epoch
     }
 
+    pub(crate) fn recording_epoch(&self) -> u64 {
+        self.epoch.load(Ordering::SeqCst)
+    }
+
     pub fn ensure(&self) -> Result<()> {
-        let epoch = self.epoch.load(Ordering::SeqCst);
+        self.ensure_scoped(self.recording_epoch(), &|| false)
+    }
+
+    pub(crate) fn ensure_scoped(
+        &self,
+        epoch: u64,
+        external_cancelled: &impl Fn() -> bool,
+    ) -> Result<()> {
         let mut worker = self.worker.lock().unwrap();
-        ensure!(!self.cancelled(epoch), "Speech backend startup cancelled");
+        ensure!(
+            !self.cancelled(epoch) && !external_cancelled(),
+            "Speech backend startup cancelled"
+        );
         if let Some(active) = worker.as_mut()
             && active.epoch == epoch
             && !active.group.exited()?
@@ -191,11 +385,11 @@ impl Engine {
             return Ok(());
         }
         *worker = None;
-        *worker = Some(self.start(epoch)?);
+        *worker = Some(self.start(epoch, external_cancelled)?);
         Ok(())
     }
 
-    fn start(&self, epoch: u64) -> Result<Worker> {
+    fn start(&self, epoch: u64, external_cancelled: &impl Fn() -> bool) -> Result<Worker> {
         let config = &self.config;
         let model = Path::new(&config.model);
         ensure!(
@@ -208,7 +402,7 @@ impl Engine {
             "Parakeet Unified supports English only. Choose English in settings."
         );
 
-        let cancelled = || self.cancelled(epoch);
+        let cancelled = || self.cancelled(epoch) || external_cancelled();
         let sandbox = run_command_until(
             Command::new("bwrap").args(SANDBOX_ARGS).arg("true"),
             None,
@@ -226,6 +420,30 @@ impl Engine {
             Command::new(&config.server)
         };
         command.arg(model).arg(config.threads.to_string());
+        command.arg("--warmup");
+        if config.normalize_gain {
+            command.arg("--normalize-gain");
+        }
+        if config.soft_speech_retry {
+            command.arg("--soft-speech-retry");
+        }
+        if config.feature_dim != 128 {
+            command
+                .arg("--feature-dim")
+                .arg(config.feature_dim.to_string());
+        }
+        if config.provider != "cpu" {
+            command.arg("--provider").arg(&config.provider);
+        }
+        for (flag, value) in [
+            ("--blank-penalty", config.blank_penalty.to_string()),
+            ("--max-active-paths", config.max_active_paths.to_string()),
+            ("--vad-threshold", config.vad_threshold.to_string()),
+            ("--vad-min-silence", config.vad_min_silence.to_string()),
+            ("--max-piece-seconds", config.max_piece_seconds.to_string()),
+        ] {
+            command.arg(flag).arg(value);
+        }
         let mut context_file = None;
         if config.vocabulary_boosting {
             let vocabulary = hotwords(&config.prompt)?;
@@ -305,15 +523,30 @@ impl Engine {
     }
 
     pub fn transcribe(&self, pcm: &[u8]) -> Result<String> {
-        let epoch = self.epoch.load(Ordering::SeqCst);
+        self.transcribe_detailed(pcm).map(|result| result.text)
+    }
+
+    pub fn transcribe_detailed(&self, pcm: &[u8]) -> Result<Transcription> {
+        self.transcribe_detailed_scoped(pcm, self.recording_epoch(), &|| false)
+    }
+
+    pub(crate) fn transcribe_detailed_scoped(
+        &self,
+        pcm: &[u8],
+        epoch: u64,
+        external_cancelled: &impl Fn() -> bool,
+    ) -> Result<Transcription> {
         ensure!(
             pcm.len().is_multiple_of(2) && pcm.len() <= PCM_LIMIT,
             "Invalid PCM16 audio length"
         );
         if !pcm.iter().any(|byte| *byte != 0) {
-            return Ok(String::new());
+            return Ok(Transcription {
+                audio_seconds: pcm.len() as f64 / (RATE * 2) as f64,
+                ..Default::default()
+            });
         }
-        let cancelled = || self.cancelled(epoch);
+        let cancelled = || self.cancelled(epoch) || external_cancelled();
         let mut worker = self.worker.lock().unwrap();
         ensure!(!cancelled(), "Speech inference cancelled");
         let active = worker
@@ -321,8 +554,11 @@ impl Engine {
             .filter(|active| active.epoch == epoch)
             .context("Speech backend is not running")?;
         let result = (|| {
-            let mut transcript = String::new();
-            for segment in split_at_pauses(pcm) {
+            let mut transcript = Transcription::default();
+            let mut audio_offset = 0.0;
+            for segment in split_at_pauses_with_limit(pcm, self.config.max_piece_seconds as usize) {
+                let segment_offset = audio_offset;
+                audio_offset += segment.len() as f64 / (RATE * 2) as f64;
                 if !segment.iter().any(|byte| *byte != 0) {
                     continue;
                 }
@@ -331,20 +567,12 @@ impl Engine {
                 active.write(&header, deadline, &cancelled)?;
                 active.write(segment, deadline, &cancelled)?;
                 let response = active.response(deadline, &cancelled)?;
-                let text = response
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .context("Speech backend returned no transcript")?;
-                for word in text
-                    .split(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
-                    .filter(|word| !word.is_empty())
-                {
-                    if !transcript.is_empty() {
-                        transcript.push(' ');
-                    }
-                    transcript.push_str(word);
-                }
+                transcript.append(
+                    transcription(&response, segment.len() as f64 / (RATE * 2) as f64)?,
+                    segment_offset,
+                );
             }
+            transcript.audio_seconds = pcm.len() as f64 / (RATE * 2) as f64;
             ensure!(!cancelled(), "Speech inference cancelled");
             Ok(transcript)
         })();
@@ -360,6 +588,35 @@ impl Engine {
                 self.runtime.join("backend.log").display()
             )
         })
+    }
+
+    pub fn peak_worker_rss_kib(&self) -> Option<u64> {
+        let worker = self.worker.lock().ok()?;
+        let root = worker.as_ref()?.group.child.id();
+        // bwrap owns the direct child PID; inspect descendants for the recognizer.
+        fn peak(pid: u32) -> Option<u64> {
+            let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+            let own = status
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("VmHWM:")?
+                        .split_whitespace()
+                        .next()?
+                        .parse::<u64>()
+                        .ok()
+                })
+                .unwrap_or(0);
+            let children = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+                .unwrap_or_default();
+            Some(
+                children
+                    .split_whitespace()
+                    .filter_map(|child| child.parse().ok())
+                    .filter_map(peak)
+                    .fold(own, u64::max),
+            )
+        }
+        peak(root).filter(|value| *value > 0)
     }
 
     pub fn stop(&self) {
@@ -384,5 +641,136 @@ impl Engine {
         {
             *worker = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod confidence_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn subword_confidence_uses_minimum_and_preserves_original_time() {
+        let decoded = transcription(
+            &json!({"text":"OpenAI works.",
+            "tokens":["▁Open","AI","▁works","."],
+            "timestamps":[0.2,0.3,0.6,0.9],"durations":[0.1,0.1,0.2,0.02],
+            "ys_log_probs":[-0.1,-1.8,-0.2,-0.3]}),
+            1.0,
+        )
+        .unwrap();
+        assert_eq!(decoded.words.len(), 2);
+        assert_eq!(decoded.words[0].text, "OpenAI");
+        assert_eq!(decoded.words[0].min_log_probability, -1.8);
+        assert_eq!(decoded.words[1].text, "works.");
+        assert_eq!(decoded.words[1].end_seconds, 0.92);
+        let mut joined = Transcription::default();
+        joined.append(decoded, 15.0);
+        assert_eq!(joined.words[0].start_seconds, 15.2);
+    }
+
+    #[test]
+    fn sherpa_space_prefixed_tokens_are_word_boundaries() {
+        let decoded = transcription(
+            &json!({"text":"And fellow Americans,",
+            "tokens":[" And"," fe","llow"," A","mer","ic","ans",","],
+            "timestamps":[0.0,0.2,0.2,0.5,0.5,0.6,0.7,0.8],
+            "durations":[],"ys_log_probs":[-0.1,-0.1,-0.2,-0.1,-0.3,-0.1,-0.1,-0.4]}),
+            1.0,
+        )
+        .unwrap();
+        assert_eq!(
+            decoded
+                .words
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>(),
+            ["And", "fellow", "Americans,"]
+        );
+        assert_eq!(decoded.words[2].min_log_probability, -0.4);
+        assert_eq!(decoded.audio_seconds, 1.0);
+    }
+
+    #[test]
+    fn chunks_use_exact_duration_and_missing_confidence_stays_unknown() {
+        let decoded = transcription(
+            &json!({"text":"one two", "chunks":[
+                {"audio_offset_seconds":2.0,"audio_duration_seconds":1.0,"result":{
+                    "text":"one","tokens":["▁one"],"timestamps":[0.2],"ys_log_probs":[-0.1]}},
+                {"audio_offset_seconds":6.0,"audio_duration_seconds":2.0,"result":{
+                    "text":"two","tokens":["▁two"],"timestamps":[0.5],"ys_log_probs":[-0.2]}}
+            ]}),
+            10.0,
+        )
+        .unwrap();
+        assert_eq!(decoded.words[0].start_seconds, 2.2);
+        assert_eq!(decoded.words[0].end_seconds, 3.0);
+        assert_eq!(decoded.words[1].start_seconds, 6.5);
+        assert_eq!(decoded.words[1].end_seconds, 8.0);
+        assert!(
+            transcription(&json!({"text":"old worker"}), 1.0)
+                .unwrap()
+                .words
+                .is_empty()
+        );
+        assert!(
+            transcription(
+                &json!({"text":"bad confidence","tokens":["▁bad"],
+            "timestamps":[0.2],"ys_log_probs":[0.8]}),
+                1.0
+            )
+            .unwrap()
+            .words
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn anomaly_requires_low_probability_or_implausible_duration() {
+        let words = vec![
+            WordConfidence {
+                text: "noise".into(),
+                start_seconds: 0.0,
+                end_seconds: 0.02,
+                min_log_probability: -3.0,
+                duration_is_reliable: true,
+            };
+            3
+        ];
+        assert!(anomaly_score(&words) >= 3.0);
+        let words = vec![
+            WordConfidence {
+                text: "speech".into(),
+                start_seconds: 0.0,
+                end_seconds: 0.3,
+                min_log_probability: -0.1,
+                duration_is_reliable: true,
+            };
+            3
+        ];
+        assert_eq!(anomaly_score(&words), 0.0);
+    }
+
+    #[test]
+    fn silence_between_tokens_is_not_an_anomalous_word_duration() {
+        let response = json!({"text":"hello world", "tokens":[" hello", " world"],
+            "timestamps":[0.5, 6.0], "durations":[], "ys_log_probs":[-0.1, -0.1]});
+        let decoded = transcription(&response, 6.5).unwrap();
+        assert_eq!(decoded.words[0].end_seconds, 6.0);
+        assert!(!decoded.words[0].duration_is_reliable);
+        assert_eq!(decoded.anomaly_score, 0.0);
+
+        let mut native = response.clone();
+        native["durations"] = json!([5.5, 0.5]);
+        assert!(transcription(&native, 6.5).unwrap().anomaly_score >= 3.0);
+        native["durations_reliable"] = json!([false, true]);
+        assert_eq!(transcription(&native, 6.5).unwrap().anomaly_score, 0.0);
+
+        let mut low_probability = response;
+        low_probability["ys_log_probs"] = json!([-3.0, -3.0]);
+        assert_eq!(
+            transcription(&low_probability, 6.5).unwrap().anomaly_score,
+            2.0
+        );
     }
 }

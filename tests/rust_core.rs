@@ -237,6 +237,12 @@ fn check_config_paths(root: &std::path::Path) {
         ("unload_minutes = 7", "Unload"),
         ("unload_minutes = false", "unload_minutes"),
         ("corrections = \"bad\"", "Correction line"),
+        ("model_variant = \"remote\"", "model_variant"),
+        ("dictation_mode = \"always\"", "dictation_mode"),
+        ("confidence_threshold = nan", "confidence_threshold"),
+        ("anomaly_threshold = inf", "anomaly_threshold"),
+        ("feature_dim = 64", "feature_dim"),
+        ("provider = \"cuda\"", "CPU provider"),
     ] {
         fs::write(&path, input).unwrap();
         assert!(

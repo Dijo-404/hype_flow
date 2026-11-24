@@ -217,15 +217,49 @@ while (payload := read_pcm()) is not None:
 }
 
 #[test]
+fn detailed_transcription_keeps_duration_of_skipped_silent_tail() {
+    let script = format!(
+        "{WORKER_SETUP}\n{}",
+        r#"
+send({'ready': True})
+while (payload := read_pcm()) is not None:
+    assert any(payload)
+    with (root / 'requests').open('a') as requests:
+        requests.write(str(len(payload) // 32000) + '\n')
+    send({'text': 'speech', 'tokens': [' speech'], 'timestamps': [0.0],
+          'durations': [1.0], 'ys_log_probs': [-0.1]})
+"#
+    );
+    let (temp, engine) = fake_engine(&script);
+    engine.ensure().unwrap();
+    let mut pcm = [1, 0].repeat(15 * RATE);
+    pcm.resize(35 * RATE * 2, 0);
+    let mut transcript = engine.transcribe_detailed(&pcm).unwrap();
+    assert_eq!(transcript.text, "speech");
+    assert_eq!(transcript.audio_seconds, 35.0);
+    assert_eq!(
+        fs::read_to_string(temp.path().join("requests")).unwrap(),
+        "15\n"
+    );
+    let next = engine.transcribe_detailed(&[1, 0].repeat(RATE)).unwrap();
+    transcript.append(next, transcript.audio_seconds);
+    assert_eq!(transcript.audio_seconds, 36.0);
+    assert_eq!(transcript.words[1].start_seconds, 35.0);
+}
+
+#[test]
 fn worker_flags_use_private_vocabulary_and_remove_it_on_stop() {
     let script = format!(
         "{WORKER_SETUP}\n{}",
         r#"
-assert sys.argv[2:4] == ['3', '--hotwords']
-hotwords = pathlib.Path(sys.argv[4])
+assert sys.argv[2] == '3'
+args = sys.argv[3:]
+assert args[:11] == ['--warmup', '--blank-penalty', '0', '--max-active-paths', '4', '--vad-threshold', '0.3', '--vad-min-silence', '0.45', '--max-piece-seconds', '15']
+assert args[11] == '--hotwords'
+hotwords = pathlib.Path(args[12])
 assert hotwords.read_text() == 'Niri\nniri'
 assert hotwords.stat().st_mode & 0o777 == 0o600
-assert sys.argv[5:] == ['1.8', '--vad', str(root / 'silero_vad.onnx'),
+assert args[13:] == ['1.8', '--vad', str(root / 'silero_vad.onnx'),
                         '--denoise', str(root / 'gtcrn_simple.onnx')]
 (root / 'hotwords-path').write_text(str(hotwords))
 send({'ready': True})
@@ -498,4 +532,121 @@ elif mode == 'held':
     let pids = fs::read_to_string(Path::new(&root).join("held")).unwrap();
     assert_eq!(pids.lines().count(), 1);
     assert!(!Path::new("/proc").join(pids.trim()).exists());
+}
+
+#[test]
+fn eager_capture_decodes_before_stop_and_preserves_all_pcm() {
+    if std::env::var_os("HYPE_EAGER_FIXTURE").is_none() {
+        let temp = TempDir::new().unwrap();
+        executable(
+            &temp.path().join("pw-record"),
+            r#"#!/usr/bin/python3
+import os, pathlib, time
+root = pathlib.Path(__file__).parent
+seconds = 21 if 'long' in __import__('sys').argv else 6
+os.write(1, b'\x00\x40' * (16000 * seconds))
+while not (root / 'decoded').exists():
+    time.sleep(.01)
+os.write(1, b'\x00\x20' * 16000)
+(root / 'captured').write_text('yes')
+time.sleep(30)
+"#,
+        );
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "eager_capture_decodes_before_stop_and_preserves_all_pcm",
+                "--nocapture",
+            ])
+            .env("HYPE_EAGER_FIXTURE", temp.path())
+            .env("PATH", temp.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let capture_root = std::env::var_os("HYPE_EAGER_FIXTURE").unwrap();
+    let script = format!(
+        "{WORKER_SETUP}\n{}",
+        r#"
+send({'ready': True})
+while (payload := read_pcm()) is not None:
+    with (root / 'received').open('ab') as audio:
+        audio.write(payload)
+    pathlib.Path(os.environ['HYPE_EAGER_FIXTURE'], 'decoded').write_text('yes')
+    send({'text': 'piece'})
+"#
+    );
+    let (temp, engine) = fake_engine(&script);
+    let engine = Arc::new(engine);
+    let (tx, rx) = mpsc::channel();
+    let spool = temp.path().join("recording.pcm");
+    let recorder = Recorder::start_eager_spooled(
+        "auto",
+        false,
+        move |_, duration| {
+            let _ = tx.send(duration);
+        },
+        || {},
+        engine.clone(),
+        5,
+        Some(&spool),
+    )
+    .unwrap();
+    wait_for_file(&Path::new(&capture_root).join("captured"));
+    while rx.recv_timeout(Duration::from_secs(5)).unwrap() < 7.0 {}
+    // The capture process withheld its last second until inference finished.
+    assert_eq!(
+        fs::metadata(temp.path().join("received")).unwrap().len(),
+        (5 * RATE * 2) as u64
+    );
+    let (tail, committed, recorded) = recorder.stop_eager(|| {}).unwrap();
+    assert_eq!(committed, "piece");
+    assert_eq!(recorded, 7 * RATE * 2);
+    let mut combined = fs::read(temp.path().join("received")).unwrap();
+    combined.extend(tail);
+    assert_eq!(
+        combined,
+        [[0, 64].repeat(6 * RATE), [0, 32].repeat(RATE)].concat()
+    );
+    assert_eq!(fs::read(&spool).unwrap(), combined);
+    assert_eq!(fs::metadata(&spool).unwrap().mode() & 0o777, 0o600);
+    assert!(engine.peak_worker_rss_kib().unwrap() > 0);
+
+    let script = format!(
+        "{WORKER_SETUP}\n{}",
+        r#"
+first = not (root / 'blocked').exists()
+send({'ready': True})
+payload = read_pcm()
+if first:
+    (root / 'blocked').write_text('yes')
+    time.sleep(60)
+else:
+    assert payload == b'\x34\x12' * 16000
+    send({'text': 'fresh'})
+"#
+    );
+    let (blocked_root, blocked) = fake_engine(&script);
+    let blocked = Arc::new(blocked);
+    let recorder =
+        Recorder::start_eager("long", false, |_, _| {}, || {}, blocked.clone(), 5).unwrap();
+    wait_for_file(&blocked_root.path().join("blocked"));
+    let began = Instant::now();
+    recorder.cancel_eager();
+    let reaper = blocked.stop_in_background();
+    blocked.prepare();
+    blocked.ensure().unwrap();
+    assert_eq!(
+        blocked.transcribe(&[0x34, 0x12].repeat(16000)).unwrap(),
+        "fresh"
+    );
+    reaper.join().unwrap();
+    assert!(recorder.stop_eager(|| {}).is_err());
+    assert!(began.elapsed() < Duration::from_secs(2));
 }

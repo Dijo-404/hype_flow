@@ -83,3 +83,67 @@ sh tools/generate-worker-bindings.sh /path/to/sherpa-onnx/c-api/c-api.h
 The script verifies the header digest, derives the 21-function allowlist from
 the preserved C reference, and supplies the complete bindgen command.
 Regeneration was verified byte-for-byte against the checked-in output.
+
+## Evaluation-only Whisper English normalizer
+
+`tools/normalizers/english.py`, `basic.py` and `english.json` derive from
+`whisper.cpp/tests/librispeech/normalizers` at commit
+`5eaee0cc9024eb9e9a99469199920c8b7f5cb9ec`. The code originates in OpenAI
+Whisper, copyright 2022 OpenAI, under the MIT license retained in
+[`tools/normalizers/LICENSE`](../tools/normalizers/LICENSE).
+The English number and spelling logic is retained; the three-element sliding
+window uses standard-library `zip`, and unused grapheme-splitting helpers are
+omitted, avoiding Python package dependencies. Rust evaluation embeds these
+sources and runs them through Python only for benchmark scoring.
+
+## Common-word vocabulary guard
+
+`src/dictation/common_words.txt` contains the first 5,000 entries of
+[high-frequency-vocabulary](https://github.com/arstgit/high-frequency-vocabulary)'s
+`10k.txt`, derived from Peter Norvig's word frequency compilation. The list is
+shared by the Rust cleanup implementation and retained Python oracle. Its MIT
+license and copyright notice are retained in
+[`common_words.LICENSE`](../src/dictation/common_words.LICENSE); source details
+are in [`common_words.SOURCE`](../src/dictation/common_words.SOURCE).
+
+The conservative fuzzy gate and legitimate repeated-word exceptions follow
+Voxtype's design. Exact matches, unique-target matching, bounded spelling
+edits, Soundex, and an exact consonant-skeleton check preserve known split-name
+and vowel-heavy-name cases. Soundex no longer reduces the edit-distance score.
+Fuzzy matching remains opt-in; no measured corpus-wide accuracy gain is claimed.
+
+
+## Conservative English number and restart processing
+
+`src/itn.rs`, `src/restarts.rs` and the word-diff helper in `src/text_diff.rs`
+adapt Voxtype's guarded processing at commit
+`4d26c1f40a71f4e9dbcedf13f1f2a887feefd96c`. Copyright 2025 Peter Jackson; the MIT license is retained in
+[licenses/voxtype.txt](licenses/voxtype.txt). They retain bounded restart anchors,
+function-word exclusions, whole-rewrite reconciliation and ordinary-word guards.
+Number conversion uses Apache-2.0 `text-processing-rs` 0.2.2, locked in
+`Cargo.lock` (crate source revision `34a9b62d64d95844d1916774054909fccee88f9a`); its license is retained in
+[licenses/text_processing_rs.txt](licenses/text_processing_rs.txt). This is a
+pure-Rust port of NeMo's English number grammars; it requires no additional model
+process. Formatting and restart editing are opt-in, and protected URLs, addresses,
+quotes and inline code bypass them.
+
+## Optional low-memory Parakeet model
+
+The low-memory choice uses [NVIDIA and Suno's Parakeet TDT-CTC 110M English
+model](https://huggingface.co/nvidia/parakeet-tdt_ctc-110m), licensed under
+[Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
+Sherpa-onnx exports its transducer branch to ONNX and quantizes the weights to
+INT8; Hype Flow does not retrain the model. Attribution and the model-card link
+apply to this modified export.
+
+- Official asset: [sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2).
+- Download size: **108,035,095 bytes**.
+- Archive SHA-256: `f628312e9fdf8686374cb01a69425c41732529d540860311f16f37cbc32cfe9b`, checked against the upstream GitHub release asset digest.
+- Installed encoder, decoder, joiner and tokens: **136,490,421 bytes**.
+- Feature dimension: 80, versus 128 for the default Unified model.
+
+This is an opt-in memory/accuracy trade-off, not a replacement default. Its
+verified archive contains no SentencePiece tokenizer, so the built-in choice
+uses greedy decoding and does not manufacture a BPE vocabulary. Configured
+literal corrections and spelling/capitalization preferences remain available
+after recognition. Existing Unified downloads remain intact when switching.

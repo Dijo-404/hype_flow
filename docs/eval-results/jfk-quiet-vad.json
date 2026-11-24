@@ -1,0 +1,274 @@
+{
+  "audio_seconds": 33.0,
+  "by_length": {
+    "5_to_20s": {
+      "formatted": {
+        "deletions": 9,
+        "errors": 14,
+        "insertions": 0,
+        "reference_words": 78,
+        "substitutions": 5,
+        "word_error_rate": 0.1794871794871795
+      },
+      "strict": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 66,
+        "substitutions": 1,
+        "word_error_rate": 0.09090909090909091
+      },
+      "whisper": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 66,
+        "substitutions": 1,
+        "word_error_rate": 0.09090909090909091
+      }
+    }
+  },
+  "by_tag": {
+    "peak_-30dbfs": {
+      "formatted": {
+        "deletions": 0,
+        "errors": 2,
+        "insertions": 0,
+        "reference_words": 26,
+        "substitutions": 2,
+        "word_error_rate": 0.07692307692307693
+      },
+      "strict": {
+        "deletions": 0,
+        "errors": 0,
+        "insertions": 0,
+        "reference_words": 22,
+        "substitutions": 0,
+        "word_error_rate": 0.0
+      },
+      "whisper": {
+        "deletions": 0,
+        "errors": 0,
+        "insertions": 0,
+        "reference_words": 22,
+        "substitutions": 0,
+        "word_error_rate": 0.0
+      }
+    },
+    "peak_-40dbfs": {
+      "formatted": {
+        "deletions": 8,
+        "errors": 9,
+        "insertions": 0,
+        "reference_words": 26,
+        "substitutions": 1,
+        "word_error_rate": 0.34615384615384615
+      },
+      "strict": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 22,
+        "substitutions": 1,
+        "word_error_rate": 0.2727272727272727
+      },
+      "whisper": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 22,
+        "substitutions": 1,
+        "word_error_rate": 0.2727272727272727
+      }
+    },
+    "public_jfk_smoke": {
+      "formatted": {
+        "deletions": 8,
+        "errors": 11,
+        "insertions": 0,
+        "reference_words": 52,
+        "substitutions": 3,
+        "word_error_rate": 0.21153846153846154
+      },
+      "strict": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 44,
+        "substitutions": 1,
+        "word_error_rate": 0.13636363636363635
+      },
+      "whisper": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 44,
+        "substitutions": 1,
+        "word_error_rate": 0.13636363636363635
+      }
+    },
+    "quiet": {
+      "formatted": {
+        "deletions": 8,
+        "errors": 11,
+        "insertions": 0,
+        "reference_words": 52,
+        "substitutions": 3,
+        "word_error_rate": 0.21153846153846154
+      },
+      "strict": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 44,
+        "substitutions": 1,
+        "word_error_rate": 0.13636363636363635
+      },
+      "whisper": {
+        "deletions": 5,
+        "errors": 6,
+        "insertions": 0,
+        "reference_words": 44,
+        "substitutions": 1,
+        "word_error_rate": 0.13636363636363635
+      }
+    }
+  },
+  "cases": 3,
+  "config": {
+    "auto_correct": true,
+    "blank_penalty": 0.0,
+    "blocked_words": "um, uh, erm, umm, uhh",
+    "boost_score": 1.5,
+    "cancel_shortcut": "Mod+Ctrl+Escape",
+    "corrections": "",
+    "cut_silence": true,
+    "dictation_shortcut": "Mod+Ctrl+Space",
+    "filter_words": true,
+    "fuzzy_tolerance": 0.18,
+    "fuzzy_vocabulary": false,
+    "gpu": false,
+    "input_target": "auto",
+    "keep_mic_ready": false,
+    "language": "en",
+    "max_active_paths": 4,
+    "max_piece_seconds": 15,
+    "model": "/home/dj/.local/share/hype-flow/models/parakeet-unified-en-int8",
+    "modifier_release_guard": false,
+    "noise_suppression": false,
+    "normalize_gain": false,
+    "paste": true,
+    "pause_media": true,
+    "press_enter": false,
+    "prompt": "",
+    "remove_repetitions": false,
+    "server": "/home/dj/projects/hype_flow/.migration/accuracy-worker/recognizer",
+    "sounds": true,
+    "threads": 4,
+    "trailing_space": false,
+    "unload_minutes": 10,
+    "vad_min_silence": 0.44999998807907104,
+    "vad_threshold": 0.30000001192092896,
+    "vocabulary_boosting": false
+  },
+  "errors": 6,
+  "keywords": {
+    "f1": 0.0,
+    "false_negatives": 0,
+    "false_positives": 0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "true_positives": 0
+  },
+  "load_seconds": 1.476040722,
+  "manifest_sha256": "1e34118415437f8754a9788ca1114e94d29dd6b2c841c1125928a4806463d54d",
+  "normalizer": "strict",
+  "p50_seconds": 0.561358191,
+  "p95_seconds": 0.615121116,
+  "peak_worker_rss_kib": 1095988,
+  "processing_seconds": 1.623148297,
+  "provenance": {
+    "decoder.int8.onnx": {
+      "bytes": 7257753,
+      "sha256": "a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6"
+    },
+    "encoder.int8.onnx": {
+      "bytes": 654040552,
+      "sha256": "6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0"
+    },
+    "joiner.int8.onnx": {
+      "bytes": 1735860,
+      "sha256": "869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a"
+    },
+    "silero_vad.onnx": {
+      "bytes": 643854,
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
+    },
+    "tokens.txt": {
+      "bytes": 8952,
+      "sha256": "dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff"
+    },
+    "worker": {
+      "bytes": 1483704,
+      "sha256": "bc6eb4882ff4a3068407af837208f17bae700e56a4fdde1e9ebe8a6afc3ae44e"
+    }
+  },
+  "raw_scores": {
+    "formatted": {
+      "deletions": 9,
+      "errors": 14,
+      "insertions": 0,
+      "reference_words": 78,
+      "substitutions": 5,
+      "word_error_rate": 0.1794871794871795
+    },
+    "strict": {
+      "deletions": 5,
+      "errors": 6,
+      "insertions": 0,
+      "reference_words": 66,
+      "substitutions": 1,
+      "word_error_rate": 0.09090909090909091
+    },
+    "whisper": {
+      "deletions": 5,
+      "errors": 6,
+      "insertions": 0,
+      "reference_words": 66,
+      "substitutions": 1,
+      "word_error_rate": 0.09090909090909091
+    }
+  },
+  "raw_word_error_rate": 0.09090909090909091,
+  "real_time_factor": 20.330859516035954,
+  "reference_words": 66,
+  "repeats": 1,
+  "scores": {
+    "formatted": {
+      "deletions": 9,
+      "errors": 14,
+      "insertions": 0,
+      "reference_words": 78,
+      "substitutions": 5,
+      "word_error_rate": 0.1794871794871795
+    },
+    "strict": {
+      "deletions": 5,
+      "errors": 6,
+      "insertions": 0,
+      "reference_words": 66,
+      "substitutions": 1,
+      "word_error_rate": 0.09090909090909091
+    },
+    "whisper": {
+      "deletions": 5,
+      "errors": 6,
+      "insertions": 0,
+      "reference_words": 66,
+      "substitutions": 1,
+      "word_error_rate": 0.09090909090909091
+    }
+  },
+  "type": "summary",
+  "word_error_rate": 0.09090909090909091
+}

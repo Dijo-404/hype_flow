@@ -1,0 +1,120 @@
+{
+  "kind": "direct_worker_before_after_smoke",
+  "limitations": "Single debug-build worker samples; configuration and implementation changed together. Not a public accuracy benchmark or causal attribution.",
+  "before": [
+    {
+      "mode": "greedy",
+      "startup_ms": 4564.96657099342,
+      "loaded": {
+        "rss_kib": 1453848,
+        "pss_kib": 1449777
+      },
+      "cases": [
+        {
+          "audio": "jfk.wav",
+          "decode_ms": 628.1050279940246,
+          "rss_kib": 1561344,
+          "pss_kib": 1557021
+        },
+        {
+          "audio": "long.wav",
+          "decode_ms": 1695.1427390013123,
+          "rss_kib": 1897416,
+          "pss_kib": 1893093
+        },
+        {
+          "audio": "silence.wav",
+          "decode_ms": 354.3261479935609,
+          "rss_kib": 1906184,
+          "pss_kib": 1901861
+        }
+      ]
+    },
+    {
+      "mode": "vad",
+      "startup_ms": 2775.7706999982474,
+      "loaded": {
+        "rss_kib": 1462368,
+        "pss_kib": 1458297
+      },
+      "cases": [
+        {
+          "audio": "jfk.wav",
+          "decode_ms": 635.2342250029324,
+          "rss_kib": 1568084,
+          "pss_kib": 1563761
+        },
+        {
+          "audio": "long.wav",
+          "decode_ms": 1779.0381939994404,
+          "rss_kib": 1902372,
+          "pss_kib": 1898049
+        },
+        {
+          "audio": "silence.wav",
+          "decode_ms": 354.65159699379,
+          "rss_kib": 1911652,
+          "pss_kib": 1907329
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "mode": "greedy",
+      "startup_ms": 1487.9426959960256,
+      "loaded": {
+        "rss_kib": 1016952,
+        "pss_kib": 1012625
+      },
+      "cases": [
+        {
+          "audio": "jfk.wav",
+          "decode_ms": 578.9890190062579,
+          "rss_kib": 1065436,
+          "pss_kib": 1061109
+        },
+        {
+          "audio": "long.wav",
+          "decode_ms": 1692.1786710008746,
+          "rss_kib": 903408,
+          "pss_kib": 899081
+        },
+        {
+          "audio": "silence.wav",
+          "decode_ms": 358.62013400765136,
+          "rss_kib": 909352,
+          "pss_kib": 905025
+        }
+      ]
+    },
+    {
+      "mode": "vad",
+      "startup_ms": 1522.7666779974243,
+      "loaded": {
+        "rss_kib": 960280,
+        "pss_kib": 956040
+      },
+      "cases": [
+        {
+          "audio": "jfk.wav",
+          "decode_ms": 633.4152569907019,
+          "rss_kib": 971912,
+          "pss_kib": 967672
+        },
+        {
+          "audio": "long.wav",
+          "decode_ms": 1678.2965129968943,
+          "rss_kib": 909428,
+          "pss_kib": 905188
+        },
+        {
+          "audio": "silence.wav",
+          "decode_ms": 12.56265000847634,
+          "rss_kib": 909428,
+          "pss_kib": 905188
+        }
+      ]
+    }
+  ]
+}
