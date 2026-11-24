@@ -1,6 +1,7 @@
 # Reproducible evaluation baseline. Never reads the live user configuration.
 # Model and worker default to the standard XDG installation; override paths with --set.
 language = "en"
+model_variant = "unified"
 prompt = ""
 threads = 4
 vocabulary_boosting = false

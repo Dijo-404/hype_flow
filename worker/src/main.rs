@@ -25,6 +25,7 @@ struct Options {
     encoder: CString,
     decoder: CString,
     joiner: CString,
+    ctc: Option<CString>,
     tokens: CString,
     vocabulary: CString,
     threads: i32,
@@ -50,6 +51,7 @@ impl Options {
         let threads = CString::new(args.next()?.as_bytes()).ok()?;
 
         let mut hotwords = None;
+        let mut ctc = false;
         let mut vad = None;
         let mut denoiser = None;
         let mut warmup = false;
@@ -65,6 +67,7 @@ impl Options {
         while let Some(flag) = args.next() {
             match flag.as_bytes() {
                 b"--hotwords" => hotwords = Some((args.next()?, args.next()?)),
+                b"--ctc" => ctc = true,
                 b"--vad" => vad = Some(CString::new(args.next()?.as_bytes()).ok()?),
                 b"--denoise" => denoiser = Some(CString::new(args.next()?.as_bytes()).ok()?),
                 b"--warmup" => warmup = true,
@@ -83,7 +86,8 @@ impl Options {
             }
         }
 
-        if !matches!(feature_dim, 80 | 128)
+        if ctc && (feature_dim != 80 || hotwords.is_some())
+            || !matches!(feature_dim, 80 | 128)
             || !(0.0..=2.0).contains(&blank_penalty)
             || !(1..=16).contains(&max_active_paths)
             || !(0.1..=0.9).contains(&vad_threshold)
@@ -142,6 +146,11 @@ impl Options {
             encoder: model_file("encoder.int8.onnx")?,
             decoder: model_file("decoder.int8.onnx")?,
             joiner: model_file("joiner.int8.onnx")?,
+            ctc: if ctc {
+                Some(model_file("model.int8.onnx")?)
+            } else {
+                None
+            },
             tokens: model_file("tokens.txt")?,
             vocabulary: model_file("bpe.vocab")?,
             threads: count as i32,
@@ -253,21 +262,25 @@ impl<'api> Decoder<'api> {
                 feature_dim: options.feature_dim,
             },
             model_config: SherpaOnnxOfflineModelConfig {
-                transducer: SherpaOnnxOfflineTransducerModelConfig {
-                    encoder: options.encoder.as_ptr(),
-                    decoder: options.decoder.as_ptr(),
-                    joiner: options.joiner.as_ptr(),
-                },
                 tokens: options.tokens.as_ptr(),
                 num_threads: options.threads,
                 provider: options.provider.as_ptr(),
-                model_type: c"nemo_transducer".as_ptr(),
                 ..Default::default()
             },
             decoding_method: c"greedy_search".as_ptr(),
             blank_penalty: options.blank_penalty,
             ..Default::default()
         };
+        if let Some(model) = &options.ctc {
+            config.model_config.nemo_ctc.model = model.as_ptr();
+        } else {
+            config.model_config.transducer = SherpaOnnxOfflineTransducerModelConfig {
+                encoder: options.encoder.as_ptr(),
+                decoder: options.decoder.as_ptr(),
+                joiner: options.joiner.as_ptr(),
+            };
+            config.model_config.model_type = c"nemo_transducer".as_ptr();
+        }
         if let Some((file, score)) = &options.hotwords {
             config.decoding_method = c"modified_beam_search".as_ptr();
             config.max_active_paths = options.max_active_paths;

@@ -107,6 +107,19 @@ The [Low Memory public result](public-low-memory.json) uses the same 1,400 clips
 and manifest hash. Its run overlapped other evaluations. Personal speech was
 outside this pass.
 
+The [Parakeet 110M CTC result](public-parakeet-ctc.json) scores the same clips
+with the default model in the Rust worker. CTC scored 8.08% Whisper WER at
+276 ms p95 and 477 MB peak worker RSS. The 110M TDT profile scored 7.48% WER
+at 498 ms p95 and 482 MB peak worker RSS. These are separate runs on the
+same host. Decoder latency includes cleanup and excludes clipboard delivery.
+
+With CTC installed, reproduce its configuration from the pinned Unified baseline:
+
+```sh
+hype-flow-evaluate /external/public/public.jsonl --config docs/eval.toml \
+  --set 'model_variant="parakeet-ctc"' --set 'feature_dim=80' --summary /external/ctc.json
+```
+
 The [35-configuration public sweep](public-sweep.json) uses 21 speech clips,
 with ten keyword-free controls. The [Low Memory sample](public-low-memory-sample.json)
 uses the same clips. The [reference-hotword sanity check](public-hotword-sanity.json)

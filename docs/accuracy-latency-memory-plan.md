@@ -716,3 +716,22 @@ Paths are relative to `/home/dj/tmp-whisper/<project>/` unless they start with
 Current code, measurements, deviations and remaining evidence gates are tracked
 in [implementation-status.md](implementation-status.md). Evaluation commands and
 summary formats are documented in [eval-results/README.md](eval-results/README.md).
+
+### Remaining work
+
+- **A2, A8.** Improve recognition across silence and cut boundaries with the
+  default CTC model. Two interior-silence comparisons changed words, and five
+  other comparisons changed only case or punctuation. CTC preserved 36 of 40
+  checkpoint phrases in order across the three long fixtures.
+- **Step 0, A1, A3, A5–A7, A9, L3.** Personal and jargon accuracy are still
+  open after the public-only pass. Larger paired runs on the default model
+  are needed to tune quiet-input gain, VAD, denoising, and thread count.
+  Calibrate number formatting and confidence controls where the decoder
+  supplies the required metadata. Unified boosting remains experimental.
+- **L1, L2, M1.** Measure live stop-to-paste p50/p95 by recording length and
+  application. Check PipeWire for overruns during eager decode. Compare
+  worker peak RSS by length against a single-pass baseline on matched audio.
+- **A9, M5.** Edit learning, local LLM cleanup, personal fine-tuning, a
+  live streaming preview, alternative inference backends, and a sherpa
+  runtime upgrade remain optional. A/B tests should establish gains before
+  changing allocator or runtime defaults.

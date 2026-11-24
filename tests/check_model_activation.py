@@ -13,7 +13,7 @@ from ui_driver import Gio, wait
 REPO = Path(__file__).resolve().parents[1]
 
 
-def inside(root, low_memory_archive):
+def inside(root, low_memory_archive, ctc_archive):
     cached = Path.home() / ".local/share/hype-flow/downloads"
     data = root / "data/hype-flow"
     downloads = data / "downloads"
@@ -21,12 +21,18 @@ def inside(root, low_memory_archive):
     for source in cached.iterdir():
         if source.is_file() and not source.name.endswith(".part"):
             (downloads / source.name).symlink_to(source)
-    if low_memory_archive:
-        (downloads / "parakeet-110m-en-int8.tar.bz2").symlink_to(low_memory_archive)
+    name = "parakeet-unified-en-int8"
+    archive = low_memory_archive or ctc_archive
+    if archive:
+        name = "parakeet-110m-ctc-en-int8" if ctc_archive else "parakeet-110m-en-int8"
+        if not (downloads / f"{name}.tar.bz2").exists():
+            (downloads / f"{name}.tar.bz2").symlink_to(archive)
     configuration = root / "config/hype-flow"
     configuration.mkdir(parents=True)
     config = configuration / "config.toml"
-    initial = 'model = "/test/previous-model"\nserver = "/test/previous-worker"\nlanguage = "auto"\ngpu = true\npaste = false\nprompt = "Saved names"\nsounds = false\npause_media = false\n'
+    initial = 'language = "auto"\ngpu = true\npaste = false\nprompt = "Saved names"\nsounds = false\npause_media = false\n'
+    if not ctc_archive:
+        initial += 'model = "/test/previous-model"\nserver = "/test/previous-worker"\n'
     if low_memory_archive:
         initial += 'model_variant = "low-memory"\n'
     config.write_text(initial)
@@ -49,15 +55,17 @@ def inside(root, low_memory_archive):
         group.activate_action("download", None)
         wait(lambda: (value := state()) and value[:2] == ("idle", "Ready"), "installed model ready", timeout=180)
         values = tomllib.loads(config.read_text())
-        name = "parakeet-110m-en-int8" if low_memory_archive else "parakeet-unified-en-int8"
         model = data / "models" / name
         assert values["model"] == str(model)
-        assert values["feature_dim"] == (80 if low_memory_archive else 128)
+        assert values["feature_dim"] == (80 if archive else 128)
         assert values["server"] == str(data / "backend/parakeet/recognizer")
         assert values["language"] == "en" and not values["gpu"]
         assert not values["paste"] and values["prompt"] == "Saved names"
         assert (configuration / "config.toml.previous").read_text() == initial
-        assert (model / "bpe.vocab").is_file() == (not low_memory_archive)
+        assert (model / "bpe.vocab").is_file() == (not archive)
+        if ctc_archive:
+            assert values["model_variant"] == "parakeet-ctc"
+            assert (model / "model.int8.onnx").is_file()
         print("Production setup action activated the verified model and preserved preferences/backup", flush=True)
         (root / "complete").touch()
     finally:
@@ -68,13 +76,17 @@ def inside(root, low_memory_archive):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--low-memory-archive", type=Path)
+    archives = parser.add_mutually_exclusive_group()
+    archives.add_argument("--low-memory-archive", type=Path)
+    archives.add_argument("--ctc-archive", type=Path)
     args = parser.parse_args()
     if args.low_memory_archive:
         args.low_memory_archive = args.low_memory_archive.resolve(strict=True)
+    if args.ctc_archive:
+        args.ctc_archive = args.ctc_archive.resolve(strict=True)
     if args.inside:
         try:
-            inside(Path(os.environ["HYPE_FLOW_ACTIVATION_ROOT"]), args.low_memory_archive)
+            inside(Path(os.environ["HYPE_FLOW_ACTIVATION_ROOT"]), args.low_memory_archive, args.ctc_archive)
         finally:
             subprocess.run(["niri", "msg", "action", "quit", "--skip-confirmation"], timeout=5)
     else:

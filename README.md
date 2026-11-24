@@ -2,11 +2,11 @@
 
 Native offline English dictation for niri. Open **Hype Flow** from your launcher. Press **Super + Ctrl + Space**, speak, then press again to paste into the original window. **Super + Ctrl + Escape** cancels.
 
-The default model is **Parakeet Unified English INT8**: **663 MB of installed model files**, below 1 GB. This limit describes model files, not total runtime RAM. The model supports English with punctuation and capitalization. Its CPU runtime stays loaded between recordings, unloads after 10 idle minutes by default (Speech model → Memory) to free about 1.4 GB, and reloads in parallel with the next recording. It communicates through anonymous pipes, with no network listener.
+The default model is **Parakeet 110M CTC English INT8**. Its installed model files total **131.7 MB**. It supports English with punctuation and capitalization. The CPU runtime stays loaded between recordings, unloads after 10 idle minutes by default (Speech model → Memory), and reloads in parallel with the next recording. It exchanges audio and results over anonymous pipes.
 
 ## Desktop setup
 
-On first use, open **Speech model**, choose a model, save the choice, then choose **Install selected model**. Unified is the accuracy-oriented default; the 110M low-memory option uses 136.5 MB of model files. Setup verifies SHA-256 checksums, installs the 501 MB compressed model archive and pinned native runtime, and stages the shipped Rust worker. Normal dictation never downloads anything or contacts external services.
+On first use, open **Speech model** and choose **Install selected model**. Setup verifies the selected archive and pinned native runtime before activating the model. To switch models, choose **110M TDT** or **Unified**, save the choice, and install it. Existing installations with a saved model continue using it until you install a different one.
 
 Choose **Configure niri** under **Shortcuts** to add bindings and autostart. The app validates the resulting configuration and saves a backup. The `hype_niri` branch includes these bindings directly. Existing display settings at `Super + Shift + D` remain available.
 
@@ -55,13 +55,13 @@ The migration has two required stages: migrate and verify the application while 
 
 ## Accuracy and limits
 
-Parakeet Unified is the English model choice based on the upstream evaluation and the reference projects. See [provenance and evidence](docs/third_party.md). No model is universally best across voices, accents, noise, and vocabulary; evaluate representative speech before claiming parity with another product.
+Parakeet 110M CTC prioritizes fast English dictation on CPU. Unified remains available for accuracy-focused use. See [provenance](docs/third_party.md) and [benchmark results](docs/eval-results/README.md).
 
 Long recordings use pause-aware chunks capped at 15 seconds by default. Completed pieces decode during capture, so stopping usually leaves only the final piece. **Cut silence before recognition** runs Silero VAD in the worker. It keeps up to 450 ms before speech and 200 ms after, and returns empty text if it detects no speech. The optional `soft_speech_retry` uses an energy gate to allow one retry on sustained audible input. Recordings under 300 ms are rejected. `backend.log` records how much audio VAD kept.
 
 **Suppress background noise** (off by default) runs sherpa-onnx's GTCRN speech-enhancement model before voice detection. It adds about 0.5 seconds per dictation. In a test with white noise down to 3 dB SNR, Parakeet already transcribed without errors with and without it, so enable it for loud rooms and compare with `hype-flow-evaluate` on your own recordings. Both small models (Silero VAD 644 KB, GTCRN 536 KB) install with the speech runtime and are checksum-verified.
 
-This runtime uses INT8 CPU inference. GPU acceleration is unavailable. **Vocabulary** accepts names and phrases. Their preferred capitalization is applied by text cleanup. Native decoder boosting is optional and off by default: OpenWhispr measured Parakeet Unified ignoring a boost of 3 and collapsing at 8, and boosting switches to slower modified beam search. When enabled, strength is adjustable from 0.5 to 3.0, and stronger bias can insert unwanted words. Compare it on your own recordings with `hype-flow-evaluate --boosting on` and `--boosting off`.
+This runtime uses INT8 CPU inference. **Vocabulary** applies preferred capitalization after recognition. Unified supports optional native decoder boosting from 0.5 to 3.0. Boosting can slow decoding and insert unwanted words. Compare it on your own recordings using `hype-flow-evaluate --config docs/eval.toml --boosting on` and `--boosting off` with Unified installed.
 
 **Near-miss correction** is opt-in. It joins split names such as “Charge B” and uses bounded spelling and phonetic checks for unique vocabulary matches. Common words, short spellings, ambiguous matches, and paths are protected. Explicit correction rules take priority. The optional confidence gate holds back guessed corrections unless the matching words have low decoder confidence.
 

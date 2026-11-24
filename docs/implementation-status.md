@@ -147,7 +147,7 @@ macro WER. Unified scored 6.44% and 6.86% respectively. Low Memory's peak
 worker RSS was 470,892 KiB, 61% below Unified's 1,202,944 KiB. Low Memory had
 the largest WER increase on AMI, from 9.99% to 15.43%. The full Low Memory run
 overlapped other evaluations, so use the small serial sweep for an exploratory
-latency comparison. Unified remains the default.
+latency comparison. Unified was the default at the time of that comparison.
 [Full Low Memory results](eval-results/public-low-memory.json),
 [matched sweep](eval-results/public-sweep.json),
 [Low Memory sample](eval-results/public-low-memory-sample.json).
@@ -185,6 +185,27 @@ installation and rollback check. A short real PipeWire probe received its first
 frame after 336 ms and discarded the audio. It did not exercise sustained
 microphone capture under inference load.
 
+## Default model update
+
+Parakeet 110M CTC INT8 is the first-run default. On 1,400 matched public clips,
+it reached 276 ms p95 decode and cleanup, down from 498 ms for 110M TDT.
+Peak worker RSS was 477 MB. Whisper WER was 8.08% versus 7.48% for TDT. On the
+70-clip standalone screening run, Canary 180M Flash scored 8.13% WER at
+1.69 seconds p95, versus 6.60% at 220 ms for CTC.
+[Full CTC results](eval-results/public-parakeet-ctc.json).
+
+First-run setup verified and activated the CTC archive in an isolated desktop
+session. The app keeps the saved model on existing installations. TDT and
+Unified remain selectable.
+
+The default-model invariance check failed on both interior-silence speech
+comparisons, with word-LCS of 97.7% and 99.2%. Five other comparisons differed
+only in case or punctuation. Pure silence passed. On the three stitched
+long-form fixtures, CTC matched 36 of 40 checkpoint phrases in order. The
+public benchmark and staged activation passed. The remaining checks are
+listed in the [accuracy plan](accuracy-latency-memory-plan.md#remaining-work)
+and [reference comparison](reference-comparison.md#remaining-work).
+
 ## Follow-through against both plans
 
 | Plan | Reference | Follow-through |
@@ -196,7 +217,7 @@ microphone capture under inference load.
 | A7 | 13 | Added opt-in number formatting using guarded `text-processing-rs` grammars. Preserve prose number words and protected spans. |
 | A8 | 9 | Exact invariance remains available and reports punctuation differences. `--word-invariance` separately checks normalized word sequences while recording exact-format differences. |
 | L2 | 15 | Tested the fallback and held-modifier behavior. Live modifier polling needs readable keyboard devices. |
-| M2, M3 | 20 | Added shorter idle unload options and a checksum-pinned, opt-in Parakeet 110M model. The low-memory model uses 80 features and greedy decoding. Unified stays the default. |
+| M2, M3 | 20 | Added shorter idle unload options and checksum-pinned Parakeet 110M exports. Both use 80 features and greedy decoding. CTC is the first-run default. |
 | A9 | 10 | Parse word confidence, remap timestamps to source audio, and apply optional anomaly filtering. Missing native duration data never turns a pause into an anomaly penalty. Thresholds still need representative calibration. |
 | — | 8, 19 | Opt-in private spool, crash recovery, failed recordings and history. Retry copies the result. Retain 20 WAVs per collection. Deletion is explicit, and recovery resumes safely after a crash during WAV promotion. |
 | A9 | 14, 16 | Added opt-in spoken punctuation, bounded restarts and filler capitalization. Exact whole-utterance commands preserve literal phrases within ordinary speech. |

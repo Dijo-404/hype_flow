@@ -96,8 +96,15 @@ def session_configurations(args, root):
     for setting in args.set:
         values.update(tomllib.loads(setting))
     default_data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-    original = Path(values.get("model", default_data / "hype-flow/models/parakeet-unified-en-int8")).expanduser().resolve()
-    model = root / "session-model"
+    if "model" in values:
+        original = Path(values["model"]).expanduser().resolve()
+    else:
+        legacy = values.get("feature_dim") == 128 or values.get("vocabulary_boosting", False)
+        variant = values.get("model_variant", "unified" if legacy else "parakeet-ctc")
+        name = {"unified": "parakeet-unified-en-int8", "low-memory": "parakeet-110m-en-int8",
+                "parakeet-ctc": "parakeet-110m-ctc-en-int8"}[variant]
+        original = (default_data / "hype-flow/models" / name).resolve()
+    model = root / original.name
     model.mkdir()
     for asset in original.iterdir():
         if asset.is_file():

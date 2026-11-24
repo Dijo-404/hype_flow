@@ -268,6 +268,7 @@ read_pcm()
     );
     let (temp, mut config) = fake_config(&script);
     config.threads = 3;
+    config.feature_dim = 128;
     config.vocabulary_boosting = true;
     config.prompt = "Niri".into();
     config.boost_score = 1.8;

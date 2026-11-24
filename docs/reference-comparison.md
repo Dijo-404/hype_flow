@@ -902,3 +902,19 @@ See [implementation-status.md](implementation-status.md) for the recommendation
 mapping, public benchmark results, and remaining validation and research items.
 The [evaluation summaries](eval-results/README.md) include the matched
 1,400-clip model comparison and the results of the vocabulary and VAD sweeps.
+
+### Remaining work
+
+- **5, 9–12, 15.** Repeat the exploratory decoder, VAD and memory comparisons
+  on the default CTC model. Measure runtime toggles one at a time, compare the
+  Silero exports, and validate confidence thresholds on models that provide
+  token probabilities. Test live capture underruns and stop-to-paste latency
+  in VS Code, a terminal, and a browser. Check for stop-cue leakage while the
+  speakers and microphone are active.
+- **17, 18.** Edit learning still needs reliable AT-SPI text access. The
+  installed niri 26.04 rejects press/release bindings, and this account has
+  no readable evdev devices for verifying a hold-to-talk fallback.
+- **20–24.** The 110M TDT and CTC profiles ship, with CTC selected by default.
+  Additional engines such as Bark int4 and OpenVINO remain research. A sherpa
+  upgrade still needs matching C bindings and a paired evaluation. Local LLM
+  cleanup, batch decoding, and per-stream hotwords remain optional.

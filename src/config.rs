@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::{cleanup, vocabulary};
+use crate::{cleanup, setup, vocabulary};
 
 pub const UNLOAD_AFTER_EACH: u32 = u32::MAX;
 pub const UNLOAD_CHOICES: [u32; 9] = [0, 1, 2, 5, 10, 15, 30, 60, UNLOAD_AFTER_EACH];
@@ -113,14 +113,16 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let root = data_dir();
+        let model = setup::model_spec(setup::DEFAULT_MODEL_VARIANT).expect("default speech model");
         // SAFETY: sysconf takes a constant and has no pointer arguments.
         let cpus = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
         Self {
             model: root
-                .join("models/parakeet-unified-en-int8")
+                .join("models")
+                .join(model.name)
                 .to_string_lossy()
                 .into_owned(),
-            model_variant: "unified".into(),
+            model_variant: setup::DEFAULT_MODEL_VARIANT.into(),
             server: root
                 .join("backend/parakeet/recognizer")
                 .to_string_lossy()
@@ -128,7 +130,7 @@ impl Default for Config {
             language: "en".into(),
             prompt: String::new(),
             threads: if cpus > 0 { cpus.min(4) as u32 } else { 4 },
-            feature_dim: 128,
+            feature_dim: model.feature_dim as i32,
             provider: "cpu".into(),
             blank_penalty: 0.0,
             max_active_paths: 4,
@@ -176,6 +178,46 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn from_table(mut supplied: toml::Table) -> Result<Self> {
+        let variant = match supplied.get("model").and_then(toml::Value::as_str) {
+            Some(model) => setup::variant_for_path(Path::new(model)),
+            None => supplied
+                .get("model_variant")
+                .and_then(toml::Value::as_str)
+                .unwrap_or_else(|| {
+                    if supplied
+                        .get("feature_dim")
+                        .and_then(toml::Value::as_integer)
+                        == Some(128)
+                        || supplied
+                            .get("vocabulary_boosting")
+                            .and_then(toml::Value::as_bool)
+                            == Some(true)
+                    {
+                        "unified"
+                    } else {
+                        setup::DEFAULT_MODEL_VARIANT
+                    }
+                }),
+        };
+        let model = setup::model_spec(variant)?;
+        let variant = toml::Value::String(variant.into());
+        supplied.entry("model_variant").or_insert(variant);
+        supplied.entry("model").or_insert_with(|| {
+            toml::Value::String(
+                data_dir()
+                    .join("models")
+                    .join(model.name)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        });
+        supplied
+            .entry("feature_dim")
+            .or_insert(toml::Value::Integer(model.feature_dim.into()));
+        Ok(supplied.try_into()?)
+    }
+
     pub fn load() -> Result<Self> {
         let path = config_dir().join("config.toml");
         let mut values = match read_existing(&path)? {
@@ -207,7 +249,7 @@ impl Config {
                         supplied.remove(key);
                     }
                 }
-                supplied.try_into()?
+                Self::from_table(supplied)?
             }
             None => Self::default(),
         };
@@ -221,25 +263,19 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
-        ensure!(
-            matches!(self.model_variant.as_str(), "unified" | "low-memory"),
-            "model_variant must be unified or low-memory"
-        );
+        setup::model_spec(&self.model_variant)?;
         ensure!(
             matches!(self.dictation_mode.as_str(), "toggle" | "hold"),
             "dictation_mode must be toggle or hold"
         );
-        if Path::new(&self.model)
-            .file_name()
-            .is_some_and(|name| name == "parakeet-110m-en-int8")
-        {
+        if setup::variant_for_path(Path::new(&self.model)) != "unified" {
             ensure!(
                 self.feature_dim == 80,
-                "The low-memory model requires feature_dim = 80"
+                "Parakeet 110M requires feature_dim = 80"
             );
             ensure!(
                 !self.vocabulary_boosting,
-                "Native vocabulary boosting is unavailable for the low-memory model; keep configured text corrections instead"
+                "Native vocabulary boosting is unavailable for Parakeet 110M. Text corrections remain available."
             );
         }
         ensure!(

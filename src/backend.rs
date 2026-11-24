@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::process::{CHILD_GRACE, ChildGroup, nonblocking, run_command_until, wait_for_io};
 use crate::segments::split_at_pauses_with_limit;
-use crate::setup::MODEL_FILES;
+use crate::setup::{model_files, variant_for_path};
 use crate::vocabulary::hotwords;
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
@@ -394,12 +394,14 @@ impl Engine {
         let model = Path::new(&config.model);
         ensure!(
             Path::new(&config.server).is_file()
-                && MODEL_FILES.iter().all(|name| model.join(name).is_file()),
+                && model_files(model)
+                    .iter()
+                    .all(|name| model.join(name).is_file()),
             "Parakeet is not installed. Open Speech model and download the model."
         );
         ensure!(
             matches!(config.language.as_str(), "en" | "auto"),
-            "Parakeet Unified supports English only. Choose English in settings."
+            "Choose English in settings to use this speech model."
         );
 
         let cancelled = || self.cancelled(epoch) || external_cancelled();
@@ -420,6 +422,9 @@ impl Engine {
             Command::new(&config.server)
         };
         command.arg(model).arg(config.threads.to_string());
+        if variant_for_path(model) == "parakeet-ctc" {
+            command.arg("--ctc");
+        }
         command.arg("--warmup");
         if config.normalize_gain {
             command.arg("--normalize-gain");

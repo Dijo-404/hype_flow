@@ -141,7 +141,7 @@ fn options() -> Result<Option<Options>> {
 }
 
 fn configuration(options: &Options) -> Result<Config> {
-    let mut table: toml::Table = toml::Table::try_from(Config::default())?;
+    let mut table = toml::Table::new();
     if let Some(path) = &options.config {
         for (key, value) in toml::from_str::<toml::Table>(&fs::read_to_string(path)?)? {
             table.insert(key, value);
@@ -155,7 +155,7 @@ fn configuration(options: &Options) -> Result<Config> {
             table.insert(key, value);
         }
     }
-    let mut values: Config = table.try_into()?;
+    let mut values = Config::from_table(table)?;
     if let Some(boosting) = options.boosting {
         values.vocabulary_boosting = boosting;
     }
@@ -207,7 +207,7 @@ fn provenance(values: &Config) -> Result<BTreeMap<String, serde_json::Value>> {
         result.insert("session_config".into(), fingerprint(Path::new(path))?);
     }
 
-    for name in hype_flow::setup::MODEL_FILES {
+    for name in hype_flow::setup::model_files(Path::new(&values.model)) {
         result.insert(
             (*name).to_owned(),
             fingerprint(&Path::new(&values.model).join(name))?,

@@ -1,7 +1,7 @@
 # Copy to ~/.config/hype-flow/config.toml. Every key is optional.
 language = "en"
-model_variant = "unified" # or "low-memory"; used by the next model download
-# Parakeet Unified supports English only. "auto" is accepted for old configurations.
+model_variant = "parakeet-ctc" # or "low-memory" (TDT) or "unified"; next download
+# These models support English. "auto" is accepted for old configurations.
 input_target = "auto"
 paste = true
 # Opt-in modifier polling on already-readable Linux keyboard devices.
@@ -12,7 +12,7 @@ dictation_shortcut = "Alt+Space"
 dictation_mode = "toggle" # "hold" requires native niri press/release bindings
 cancel_shortcut = "Mod+Ctrl+Escape"
 # Model files and runtime installed by the app:
-# model = "/absolute/path/to/parakeet-unified-en-int8"
+# model = "/absolute/path/to/parakeet-110m-ctc-en-int8"
 # server = "/absolute/path/to/backend/parakeet/recognizer"
 # gpu is retained for compatibility; this runtime uses the CPU.
 
@@ -20,7 +20,7 @@ cancel_shortcut = "Mod+Ctrl+Escape"
 # Empty by default. Listed spellings also supply preferred capitalization.
 prompt = ""
 vocabulary_boosting = false
-# Decoder bias, not a guaranteed correction. Keep low; valid range 0.5 to 3.0.
+# Unified only. Keep decoder bias low. Valid range 0.5 to 3.0.
 boost_score = 1.5
 # Native hotwords are capped at 100 entries after case variants.
 # Guessed spelling is opt-in; exact capitalization and correction rules still work.
@@ -87,7 +87,7 @@ anomaly_threshold = 3.0
 # Only one retry, and only when an energy gate detects sustained audible input.
 soft_speech_retry = false
 
-# Advanced CPU runtime experiments. Unified uses 128 features; the 110M model uses 80.
-feature_dim = 128
+# Advanced CPU runtime experiments. Unified uses 128 features and 110M models use 80.
+# feature_dim = 80
 provider = "cpu"
 # provider = "cpu:/absolute/model/directory/session.cfg"

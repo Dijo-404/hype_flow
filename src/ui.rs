@@ -488,7 +488,7 @@ impl Home {
             (
                 "vocabulary_boosting",
                 "Boost vocabulary during recognition",
-                "Experimental. Slows decoding and can insert unwanted words.",
+                "Available with Unified. Experimental and can insert unwanted words.",
                 &vocabulary,
             ),
             (
@@ -594,7 +594,11 @@ impl Home {
                     ("unified".into(), "Unified English INT8 · 663 MB".into()),
                     (
                         "low-memory".into(),
-                        "Low memory 110M INT8 · 136.5 MB".into(),
+                        "Parakeet 110M TDT INT8 · 136.5 MB".into(),
+                    ),
+                    (
+                        "parakeet-ctc".into(),
+                        "Parakeet 110M CTC INT8 · 131.7 MB (default)".into(),
                     ),
                 ],
                 &transcription,

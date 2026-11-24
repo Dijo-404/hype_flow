@@ -65,17 +65,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix="hype-flow-ui-") as temporary:
         root = Path(temporary)
         data = root / "data/hype-flow"
-        model = data / "models/parakeet-unified-en-int8"
+        model = data / "models/parakeet-110m-ctc-en-int8"
         backend = data / "backend/parakeet"
         config = root / "config/hype-flow"
         fake = root / "bin"
         for directory in (model, backend, config, fake):
             directory.mkdir(parents=True)
-        for name in ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt", "bpe.vocab"):
+        for name in ("model.int8.onnx", "tokens.txt"):
             (model / name).touch()
         for name in ("silero_vad.onnx", "gtcrn_simple.onnx"):
             (model.parent / name).touch()
-        (backend / "recognizer.version").write_text("6\n")
+        (backend / "recognizer.version").write_text("7\n")
         write_executable(backend / "recognizer", "#!" + sys.executable + "\n" + r'''
 import json, struct, sys, time
 def send(value):
@@ -182,9 +182,10 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             Gio.bus_unown_name(owner)
             connection.unexport_action_group(exported)
             wait(overlay_visible, "notch disappearance restores fallback")
+            wait(lambda: state()[3] >= 0.35, "minimum recording duration before paste")
             group.activate_action("toggle", None)
-            wait(lambda: phase("done"), "transcript delivery")
             try:
+                wait(lambda: phase("done"), "transcript delivery")
                 wait(lambda: text() == "OpenAI hello.", "paste into original target")
             except AssertionError as error:
                 raise AssertionError(f"{error}. Status: {state()!r}, target text: {text()!r}") from error

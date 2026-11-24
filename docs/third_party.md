@@ -1,12 +1,13 @@
 # Reuse and provenance
 
-Hype Flow uses sherpa-onnx with NVIDIA Parakeet Unified English INT8. The desktop is a native GTK application. It does not bundle OpenWhispr's Electron application or Handy's Tauri application.
+Hype Flow uses sherpa-onnx with NVIDIA Parakeet 110M CTC English INT8. The native
+GTK desktop also supports the 110M transducer export and Parakeet Unified.
 
 ## OpenWhispr reference
 
 Reference checkout: `007826d936af15e89291c1106042f1b280a75933`.
 
-The selected model, pinned sherpa-onnx version, and four required model files follow `src/models/modelRegistryData.json`, `src/helpers/parakeetModelInfo.js`, and `scripts/download-sherpa-onnx.js`. The CPU runtime is version **1.13.8**, using the upstream `shared-no-tts` archive, as in the reference.
+The Unified profile and its four required model files follow `src/models/modelRegistryData.json`, `src/helpers/parakeetModelInfo.js`, and `scripts/download-sherpa-onnx.js`. The CPU runtime remains version **1.13.8**, using the upstream `shared-no-tts` archive.
 
 `src/dictation/segments.py` ports `src/helpers/parakeetSegmentation.js` to PCM16. It moves 15-second chunk boundaries toward pauses without dropping, duplicating, or reordering samples, and absorbs tails up to 0.5 seconds. The native SDK handles inference; Hype Flow's Rust worker keeps the model loaded and exchanges PCM and results over anonymous pipes. It opens no HTTP or WebSocket server.
 
@@ -127,23 +128,27 @@ pure-Rust port of NeMo's English number grammars; it requires no additional mode
 process. Formatting and restart editing are opt-in, and protected URLs, addresses,
 quotes and inline code bypass them.
 
-## Optional low-memory Parakeet model
+## Parakeet 110M profiles
 
-The low-memory choice uses [NVIDIA and Suno's Parakeet TDT-CTC 110M English
+The 110M profiles use [NVIDIA and Suno's Parakeet TDT-CTC 110M English
 model](https://huggingface.co/nvidia/parakeet-tdt_ctc-110m), licensed under
 [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
-Sherpa-onnx exports its transducer branch to ONNX and quantizes the weights to
-INT8; Hype Flow does not retrain the model. Attribution and the model-card link
-apply to this modified export.
+Sherpa-onnx exports the CTC and transducer branches to ONNX and quantizes
+them to INT8. The same attribution applies to both exports.
+
+The default CTC profile uses the [official sherpa-onnx CTC archive](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2).
+The 104,337,827-byte download has SHA-256
+`17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b`,
+verified against the upstream release asset digest. The installed model and
+token table total 131,662,124 bytes.
+
+The TDT profile uses the transducer export.
 
 - Official asset: [sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2).
 - Download size: **108,035,095 bytes**.
 - Archive SHA-256: `f628312e9fdf8686374cb01a69425c41732529d540860311f16f37cbc32cfe9b`, checked against the upstream GitHub release asset digest.
 - Installed encoder, decoder, joiner and tokens: **136,490,421 bytes**.
-- Feature dimension: 80, versus 128 for the default Unified model.
+- Both 110M profiles use 80 features. Unified uses 128.
 
-This is an opt-in memory/accuracy trade-off, not a replacement default. Its
-verified archive contains no SentencePiece tokenizer, so the built-in choice
-uses greedy decoding and does not manufacture a BPE vocabulary. Configured
-literal corrections and spelling/capitalization preferences remain available
-after recognition. Existing Unified downloads remain intact when switching.
+Both 110M profiles use greedy decoding. Configured literal corrections and
+spelling and capitalization preferences apply after recognition.
