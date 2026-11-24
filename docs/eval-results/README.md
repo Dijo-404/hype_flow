@@ -107,11 +107,14 @@ The [Low Memory public result](public-low-memory.json) uses the same 1,400 clips
 and manifest hash. Its run overlapped other evaluations. Personal speech was
 outside this pass.
 
-The [Parakeet 110M CTC result](public-parakeet-ctc.json) scores the same clips
-with the default model in the Rust worker. CTC scored 8.08% Whisper WER at
-276 ms p95 and 477 MB peak worker RSS. The 110M TDT profile scored 7.48% WER
-at 498 ms p95 and 482 MB peak worker RSS. These are separate runs on the
-same host. Decoder latency includes cleanup and excludes clipboard delivery.
+The [initial Parakeet 110M CTC result](public-parakeet-ctc.json) scored 8.08%
+Whisper WER at 276 ms p95 and 477 MB peak worker RSS on the same clips.
+[CTC with original pauses preserved](public-parakeet-ctc-pauses.json) scored
+8.03% WER at 260 ms p95 and 477 MB peak worker RSS. The 110M TDT profile
+scored 7.48% WER at 498 ms p95 and 482 MB peak worker RSS. These are separate
+runs on the same host. A paired 70-clip check with three repeats had one
+additional word error and a 12 ms higher p95 for pause preservation. Decoder
+latency includes cleanup and excludes clipboard delivery.
 
 With CTC installed, reproduce its configuration from the pinned Unified baseline:
 

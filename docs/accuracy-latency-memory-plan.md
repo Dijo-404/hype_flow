@@ -719,10 +719,11 @@ summary formats are documented in [eval-results/README.md](eval-results/README.m
 
 ### Remaining work
 
-- **A2, A8.** Improve recognition across silence and cut boundaries with the
-  default CTC model. Two interior-silence comparisons changed words, and five
-  other comparisons changed only case or punctuation. CTC preserved 36 of 40
-  checkpoint phrases in order across the three long fixtures.
+- **A2, A8.** CTC now preserves the original pauses within each bounded decode
+  and passes both original interior-silence word comparisons. One original
+  leading-silence comparison still changes a word. Some public variants still
+  differ in words, case, or punctuation. CTC matches 36 of 40 checkpoint
+  phrases in order across the three long fixtures.
 - **Step 0, A1, A3, A5–A7, A9, L3.** Personal and jargon accuracy are still
   open after the public-only pass. Larger paired runs on the default model
   are needed to tune quiet-input gain, VAD, denoising, and thread count.

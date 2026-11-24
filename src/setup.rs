@@ -108,7 +108,7 @@ pub fn model_files(model: &Path) -> &'static [&'static str] {
     }
 }
 
-pub const NATIVE_VERSION: &str = "7";
+pub const NATIVE_VERSION: &str = "8";
 const TOKENIZER_REVISION: &str = "7a16ff98b72e5b0beba6f182a5357c704d977b15";
 const TOKENIZER_SHA256: &str = "07d4e5a63840a53ab2d4d106d2874768143fb3fbdd47938b3910d2da05bfb0a9";
 const AUDIO_MODELS: &[(&str, &str, &str)] = &[
@@ -129,8 +129,10 @@ pub fn assets_ready(values: &Config) -> bool {
     let server = Path::new(&values.server);
     let ctc = variant_for_path(model) == "parakeet-ctc";
     server.is_file()
-        && fs::read_to_string(server.with_file_name("recognizer.version"))
-            .is_ok_and(|version| version.trim() == NATIVE_VERSION || !ctc && version.trim() == "6")
+        && fs::read_to_string(server.with_file_name("recognizer.version")).is_ok_and(|version| {
+            let version = version.trim();
+            version == NATIVE_VERSION || !ctc && matches!(version, "6" | "7")
+        })
         && model_files(model)
             .iter()
             .all(|name| model.join(name).is_file())
@@ -589,6 +591,8 @@ mod tests {
         }
         values.model = model.to_string_lossy().into_owned();
         values.vocabulary_boosting = false;
+        assert!(!assets_ready(&values));
+        fs::write(server.with_file_name("recognizer.version"), "7\n").unwrap();
         assert!(!assets_ready(&values));
         fs::write(server.with_file_name("recognizer.version"), NATIVE_VERSION).unwrap();
         assert!(assets_ready(&values));

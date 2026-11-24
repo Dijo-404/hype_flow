@@ -242,6 +242,34 @@ fn boosted_denoised_audio_is_windowed_and_overlapping_padding_is_deduplicated() 
 }
 
 #[test]
+fn ctc_keeps_original_samples_between_vad_ranges() {
+    let stage = staged_worker();
+    let mut command = worker(&stage);
+    command.env("FAKE_SHERPA_MODE", "ctc-pause").args([
+        "model",
+        "2",
+        "--ctc",
+        "--feature-dim",
+        "80",
+        "--vad",
+        "vad",
+        "--denoise",
+        "denoise",
+    ]);
+    let output = run(command, &pcm(&(0..20_000).collect::<Vec<_>>()));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut stdout = output.stdout.as_slice();
+    assert_eq!(frame(&mut stdout), READY);
+    let result: serde_json::Value = serde_json::from_slice(&frame(&mut stdout)).unwrap();
+    assert_eq!(result["text"], "paused");
+    assert_eq!(result["timestamps"], serde_json::json!([0.75]));
+}
+
+#[test]
 fn empty_vad_returns_empty_even_when_denoiser_is_incompatible() {
     let stage = staged_worker();
     let mut command = worker(&stage);

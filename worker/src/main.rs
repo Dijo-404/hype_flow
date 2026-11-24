@@ -249,6 +249,7 @@ struct Decoder<'api> {
     denoiser: Option<Native<'api, SherpaOnnxOfflineSpeechDenoiser>>,
     recognizer: Native<'api, SherpaOnnxOfflineRecognizer>,
     maximum: usize,
+    preserve_pauses: bool,
     normalize_gain: bool,
     soft_speech_retry: bool,
 }
@@ -351,6 +352,7 @@ impl<'api> Decoder<'api> {
             denoiser,
             recognizer,
             maximum: options.max_piece_seconds * SAMPLE_RATE as usize,
+            preserve_pauses: options.ctc.is_some(),
             normalize_gain: options.normalize_gain,
             soft_speech_retry: options.soft_speech_retry,
         })
@@ -394,7 +396,7 @@ impl<'api> Decoder<'api> {
         let audio = normalized.as_deref().unwrap_or(audio);
         let fallback = (self.soft_speech_retry && audible_speech(audio)).then(|| audio.to_vec());
         let (speech, time_map) = if let Some(vad) = &self.vad {
-            let (speech, time_map) = speech_only(api, vad.as_ptr(), audio)?;
+            let (speech, time_map) = speech_only(api, vad.as_ptr(), audio, self.preserve_pauses)?;
             let seconds = audio.len() as f32 / SAMPLE_RATE as f32;
             let mut stderr = io::stderr().lock();
             if speech.is_empty() {
@@ -529,6 +531,7 @@ fn speech_only(
     api: &SherpaApi,
     vad: *const SherpaOnnxVoiceActivityDetector,
     samples: &[f32],
+    preserve_pauses: bool,
 ) -> Result<(Vec<f32>, Vec<SpeechRange>)> {
     let mut speech = Vec::new();
     let mut time_map = Vec::new();
@@ -558,7 +561,13 @@ fn speech_only(
         .context("get voice activity segment")?;
         let start = i64::from(segment.get().start);
         let end = (start + i64::from(segment.get().n) + PAD_AFTER).min(samples.len() as i64);
-        let start = (start - PAD_BEFORE).max(covered);
+        // CTC recognition is sensitive to replacing interior pauses with
+        // synthetic audio. Keep the original timing inside the bounded piece.
+        let start = if preserve_pauses && covered > 0 {
+            covered
+        } else {
+            (start - PAD_BEFORE).max(covered)
+        };
         if end > start {
             if covered > 0 && start > covered {
                 speech.resize(speech.len() + 1600, 0.0);

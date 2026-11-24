@@ -75,7 +75,7 @@ def main():
             (model / name).touch()
         for name in ("silero_vad.onnx", "gtcrn_simple.onnx"):
             (model.parent / name).touch()
-        (backend / "recognizer.version").write_text("7\n")
+        (backend / "recognizer.version").write_text("8\n")
         write_executable(backend / "recognizer", "#!" + sys.executable + "\n" + r'''
 import json, struct, sys, time
 def send(value):

@@ -26,26 +26,32 @@ unsafe extern "C" fn SherpaOnnxCreateOfflineRecognizer(
 ) -> *const SherpaOnnxOfflineRecognizer {
     let config = &*config;
     let model = &config.model_config;
+    let ctc = mode("ctc-pause");
     assert_eq!(config.feat_config.sample_rate, 16000);
     assert_eq!(
         config.feat_config.feature_dim,
-        if mode("feature-80") { 80 } else { 128 }
+        if ctc || mode("feature-80") { 80 } else { 128 }
     );
     assert_eq!(model.num_threads, 2);
     assert_eq!(CStr::from_ptr(model.provider), c"cpu");
-    assert_eq!(CStr::from_ptr(model.model_type), c"nemo_transducer");
-    assert_eq!(
-        CStr::from_ptr(model.transducer.encoder),
-        c"model/encoder.int8.onnx"
-    );
-    assert_eq!(
-        CStr::from_ptr(model.transducer.decoder),
-        c"model/decoder.int8.onnx"
-    );
-    assert_eq!(
-        CStr::from_ptr(model.transducer.joiner),
-        c"model/joiner.int8.onnx"
-    );
+    if ctc {
+        assert_eq!(CStr::from_ptr(model.nemo_ctc.model), c"model/model.int8.onnx");
+        assert!(model.transducer.encoder.is_null());
+    } else {
+        assert_eq!(CStr::from_ptr(model.model_type), c"nemo_transducer");
+        assert_eq!(
+            CStr::from_ptr(model.transducer.encoder),
+            c"model/encoder.int8.onnx"
+        );
+        assert_eq!(
+            CStr::from_ptr(model.transducer.decoder),
+            c"model/decoder.int8.onnx"
+        );
+        assert_eq!(
+            CStr::from_ptr(model.transducer.joiner),
+            c"model/joiner.int8.onnx"
+        );
+    }
     assert_eq!(CStr::from_ptr(model.tokens), c"model/tokens.txt");
     if config.hotwords_file.is_null() {
         assert_eq!(CStr::from_ptr(config.decoding_method), c"greedy_search");
@@ -107,7 +113,12 @@ unsafe extern "C" fn SherpaOnnxGetOfflineStreamResult(
 ) -> *const SherpaOnnxOfflineRecognizerResult {
     let samples = &*p.cast::<Vec<f32>>();
     static RESULTS: AtomicUsize = AtomicUsize::new(0);
-    let json = if mode("empty-first") {
+    let json = if mode("ctc-pause") {
+        // Sample 12,000 is between the two padded VAD ranges.
+        assert_eq!(samples.len(), 19_200);
+        assert_eq!(samples[12_000 - 800], 12_000.0 / 65536.0);
+        "{\"text\":\"paused\",\"timestamps\":[0.7]}".to_owned()
+    } else if mode("empty-first") {
         if RESULTS.fetch_add(1, Relaxed) == 0 {
             "{\"text\":\"\"}".to_owned()
         } else {
@@ -205,7 +216,10 @@ unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorPop(_: *const SherpaOnnxVoic
 unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorFront(
     _: *const SherpaOnnxVoiceActivityDetector,
 ) -> *const SherpaOnnxSpeechSegment {
-    let (start, n) = if SEGMENTS.load(Relaxed) == 2 {
+    let first = SEGMENTS.load(Relaxed) == 2;
+    let (start, n) = if mode("ctc-pause") {
+        if first { (8_000, 500) } else { (19_800, 100) }
+    } else if first {
         (10_000, 500)
     } else {
         (13_000, 700)

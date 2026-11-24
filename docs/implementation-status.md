@@ -198,13 +198,32 @@ First-run setup verified and activated the CTC archive in an isolated desktop
 session. The app keeps the saved model on existing installations. TDT and
 Unified remain selectable.
 
-The default-model invariance check failed on both interior-silence speech
+Before pause preservation, the default-model check failed both interior-silence speech
 comparisons, with word-LCS of 97.7% and 99.2%. Five other comparisons differed
 only in case or punctuation. Pure silence passed. On the three stitched
 long-form fixtures, CTC matched 36 of 40 checkpoint phrases in order. The
 public benchmark and staged activation passed. The remaining checks are
 listed in the [accuracy plan](accuracy-latency-memory-plan.md#remaining-work)
 and [reference comparison](reference-comparison.md#remaining-work).
+
+### CTC pause preservation
+
+Worker revision 8 keeps the original PCM between VAD speech ranges in each
+bounded CTC decode. It still trims leading and trailing silence and returns
+empty text when VAD finds no speech. The two original interior-silence word
+comparisons now pass. One leading-silence word comparison and five case or
+punctuation comparisons remain open. The long fixtures still pass 36 of 40
+exact checkpoint phrases in order.
+
+On 56 variants of 14 additional public clips, word mismatches fell from
+eight to five. Interior-silence word mismatches fell from five to two.
+A separate 35-case noise and silence sample held at 21.60% Whisper WER.
+
+Across the same 1,400 public clips, Whisper WER changed from 8.08% to 8.03%.
+Peak worker RSS was 477 MB. The separate full runs measured 276 ms and 260 ms
+at p95. The paired 70-clip test measured 238 ms and 250 ms at p95 and
+one additional word error. These measurements show a small runtime trade-off
+across the samples. [Updated public scores](eval-results/public-parakeet-ctc-pauses.json).
 
 ## Follow-through against both plans
 
