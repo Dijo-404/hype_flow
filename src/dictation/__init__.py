@@ -1,1 +1,0 @@
-"""Offline dictation for niri."""

@@ -9,7 +9,7 @@ use hype_flow::{
 };
 
 #[test]
-fn cleanup_agrees_with_python_fixtures() {
+fn cleanup_matches_regression_fixtures() {
     #[derive(serde::Deserialize)]
     struct Case {
         input: String,
@@ -134,7 +134,7 @@ fn malformed_tokenizer_fields_and_pieces_are_rejected() {
 fn segmentation_preserves_samples_and_uses_the_quiet_run_midpoint() {
     let loud = 1000_i16.to_le_bytes().repeat(16000);
     let pcm = [loud.repeat(12), vec![0; 16000], loud.repeat(8)].concat();
-    let slices = segments::split_at_pauses(&pcm);
+    let slices = segments::split_at_pauses_with_limit(&pcm, 15);
     assert_eq!(
         slices.iter().map(|chunk| chunk.len()).collect::<Vec<_>>(),
         [392_000, 264_000]
@@ -145,12 +145,12 @@ fn segmentation_preserves_samples_and_uses_the_quiet_run_midpoint() {
         .flat_map(i16::to_le_bytes)
         .collect::<Vec<_>>()
         .repeat(5000);
-    let slices = segments::split_at_pauses(&pcm);
+    let slices = segments::split_at_pauses_with_limit(&pcm, 15);
     assert_eq!(slices.concat(), pcm);
-    assert!(slices.iter().all(|slice| slice.len() <= 496_000));
-    let pcm = 1i16.to_le_bytes().repeat(244_000);
-    assert_eq!(segments::split_at_pauses(&pcm), [&pcm[..]]);
-    assert!(segments::split_at_pauses(&[]).is_empty());
+    assert!(slices.iter().all(|slice| slice.len() <= 480_000));
+    let pcm = 1i16.to_le_bytes().repeat(240_000);
+    assert_eq!(segments::split_at_pauses_with_limit(&pcm, 15), [&pcm[..]]);
+    assert!(segments::split_at_pauses_with_limit(&[], 15).is_empty());
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn check_config_paths(root: &std::path::Path) {
     );
     assert_eq!(defaults.language, "en");
     assert_eq!(defaults.unload_minutes, 10);
-    assert_eq!(defaults.dictation_shortcut, "Mod+Ctrl+Space");
+    assert_eq!(defaults.dictation_shortcut, "Alt+Space");
     assert_eq!(defaults.cancel_shortcut, "Mod+Ctrl+Escape");
     assert_eq!(
         (defaults.boost_score, defaults.fuzzy_tolerance),

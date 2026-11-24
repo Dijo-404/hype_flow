@@ -142,15 +142,17 @@ clips provide the [speed and codec variants](public-media.json).
 [Long-form scores](public-long-boundary.json) and [checkpoint results](public-long-checkpoints.json)
 cover three recordings stitched from 40 individually verified LibriSpeech clean clips.
 
-Measure capture end to paste with PCM replay in an isolated nested niri session:
+Measure capture end to paste with PCM replay in an isolated nested niri session.
+Use an assets directory with Unified and its worker installed.
 
 ```sh
-python3 tests/benchmark_migration.py --only rust --assets /staged/share/hype-flow \
+python3 tests/benchmark_desktop.py --assets /staged/share/hype-flow \
   --manifest /external/replay.jsonl --pace --repetitions 3 --output /external/desktop
 ```
 
-The driver replays the first manifest row at 16 kHz into the app, then
-checks the pasted text against the reference. The [short replay](desktop-paced-short.json)
+The driver replays the first manifest row at 16 kHz and checks the pasted text
+against the reference. It samples memory before the first recording and after
+paste. The [short replay](desktop-paced-short.json)
 uses an 11-second public clip and records three samples after warm-up. The
 [long replay](desktop-paced-long.json) uses a 34.5-second clip and records two
 samples after warm-up with clipboard tracing. Its results include nested

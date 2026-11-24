@@ -9,11 +9,11 @@ Reference checkout: `007826d936af15e89291c1106042f1b280a75933`.
 
 The Unified profile and its four required model files follow `src/models/modelRegistryData.json`, `src/helpers/parakeetModelInfo.js`, and `scripts/download-sherpa-onnx.js`. The CPU runtime remains version **1.13.8**, using the upstream `shared-no-tts` archive.
 
-`src/dictation/segments.py` ports `src/helpers/parakeetSegmentation.js` to PCM16. It moves 15-second chunk boundaries toward pauses without dropping, duplicating, or reordering samples, and absorbs tails up to 0.5 seconds. The native SDK handles inference; Hype Flow's Rust worker keeps the model loaded and exchanges PCM and results over anonymous pipes. It opens no HTTP or WebSocket server.
+`src/segments.rs` adapts `src/helpers/parakeetSegmentation.js` to PCM16. It prefers pauses when choosing chunk boundaries and caps each piece at the configured duration. The native SDK handles inference, and Hype Flow's Rust worker exchanges PCM and results over anonymous pipes.
 
 The reference disables hotword boosting for Parakeet Unified because its benefit has not been validated and high scores damaged recognition (`src/utils/sherpaHotwords.js`). Hype Flow exposes it at the user's request, using the [documented transducer hotword path](https://k2-fsa.github.io/sherpa/onnx/hotwords/index.html): `modified_beam_search`, four active paths, BPE encoding, and a bounded score of 0.5–3.0 (default 1.5). An empty list or disabled boost keeps greedy decoding. This is native decoder biasing, not a guarantee that Unified recognizes a listed term more accurately.
 
-Text cleanup is local Rust processing, ported from the retained Python reference: configured corrections, vocabulary capitalization, explicit word filters, and optional adjacent repeated-word removal. It adds no model or spelling dependency. Corrections and default filler filtering are enabled; repeated-word removal is disabled. The original pre-cleanup result remains separately recoverable.
+The Rust cleanup code ports the previous Python implementation's configured corrections, vocabulary capitalization, explicit word filters, and optional adjacent repeated-word removal. Corrections and default filler filtering are enabled by default. Repeated-word removal is opt-in. The original recognition remains recoverable.
 
 Linux paste routing also follows `src/helpers/clipboard.js` at the reference commit above: VS Code and Cursor use Shift+Insert with the transcript available in both clipboard selections. Hype Flow restores each selection independently and retains its cancellation and focus checks. This route also covers VSCodium.
 
@@ -60,10 +60,9 @@ The application and its speech worker have been ported to Rust, with GTK4 for
 the desktop interface. `Cargo.lock` records the
 exact Rust dependency versions. GTK4 and GTK4 layer-shell replace the prior
 GTK3 bindings; model and inference-runtime provenance above remains unchanged.
-The application-owned C worker remains the phase-1 compatibility and rollback
-reference. The second phase replaced that wrapper while retaining the pinned
-sherpa-onnx API and ONNX Runtime native libraries. Verification and measured
-limits are recorded in [migration-results.md](migration-results.md).
+The Rust worker uses the same pinned sherpa-onnx API and ONNX Runtime native
+libraries as the previous C worker. [Migration results](migration-results.md)
+record verification and the revision containing the original source.
 
 Clipboard sensitivity uses `wl-copy --sensitive` from wl-clipboard 2.3 or
 later. Existing model notices and reference-project credits remain applicable.
@@ -82,7 +81,7 @@ sh tools/generate-worker-bindings.sh /path/to/sherpa-onnx/c-api/c-api.h
 ```
 
 The script verifies the header digest, derives the 21-function allowlist from
-the preserved C reference, and supplies the complete bindgen command.
+the Rust worker's API calls, and runs bindgen.
 Regeneration was verified byte-for-byte against the checked-in output.
 
 ## Evaluation-only Whisper English normalizer
@@ -99,13 +98,11 @@ sources and runs them through Python only for benchmark scoring.
 
 ## Common-word vocabulary guard
 
-`src/dictation/common_words.txt` contains the first 5,000 entries of
+`assets/common_words.txt` contains the first 5,000 entries of
 [high-frequency-vocabulary](https://github.com/arstgit/high-frequency-vocabulary)'s
-`10k.txt`, derived from Peter Norvig's word frequency compilation. The list is
-shared by the Rust cleanup implementation and retained Python oracle. Its MIT
-license and copyright notice are retained in
-[`common_words.LICENSE`](../src/dictation/common_words.LICENSE); source details
-are in [`common_words.SOURCE`](../src/dictation/common_words.SOURCE).
+`10k.txt`, derived from Peter Norvig's word frequency compilation. Rust embeds
+the list for vocabulary cleanup. See the [MIT license](../assets/common_words.LICENSE)
+and [source details](../assets/common_words.SOURCE).
 
 The conservative fuzzy gate and legitimate repeated-word exceptions follow
 Voxtype's design. Exact matches, unique-target matching, bounded spelling

@@ -219,7 +219,7 @@
   font-family: "Noto Sans", sans-serif;
   font-size: 13px;
 }
-#hype-settings textview:focus { outline: 1px solid alpha(@hf_accent, 0.8); outline-offset: -1px; -gtk-outline-radius: 6px; }
+#hype-settings textview:focus { outline: 1px solid alpha(@hf_accent, 0.8); outline-offset: -1px; }
 #hype-settings textview text selection { background: alpha(@hf_accent, 0.55); color: white; }
 
 /* Stepper: one control instead of three boxes. */

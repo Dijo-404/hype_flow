@@ -170,7 +170,7 @@ impl Default for Config {
             hallucination_filtering: false,
             anomaly_threshold: 3.0,
             soft_speech_retry: false,
-            dictation_shortcut: "Mod+Ctrl+Space".into(),
+            dictation_shortcut: "Alt+Space".into(),
             dictation_mode: "toggle".into(),
             cancel_shortcut: "Mod+Ctrl+Escape".into(),
         }

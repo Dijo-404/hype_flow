@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the production Rust app in an isolated D-Bus/Wayland session.
-
-Only tests use Python. The installed application and evaluator do not.
-"""
+"""Exercise the production Rust app in an isolated D-Bus/Wayland session."""
 
 import json
 import os
@@ -76,8 +73,11 @@ def main():
         for name in ("silero_vad.onnx", "gtcrn_simple.onnx"):
             (model.parent / name).touch()
         (backend / "recognizer.version").write_text("8\n")
+        worker_started = root / "worker-started"
         write_executable(backend / "recognizer", "#!" + sys.executable + "\n" + r'''
-import json, struct, sys, time
+from pathlib import Path
+import json, os, struct, sys, time
+Path(os.environ["HYPE_TEST_WORKER_STARTED"]).touch()
 def send(value):
     data = json.dumps(value).encode()
     sys.stdout.buffer.write(struct.pack("<I", len(data)) + data)
@@ -120,6 +120,7 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
         env = {**os.environ, "XDG_DATA_HOME": str(root / "data"), "XDG_CONFIG_HOME": str(root / "config"), "XDG_STATE_HOME": str(root / "state"), "NIRI_CONFIG": str(niri_config), "PATH": str(fake) + ":" + os.environ["PATH"], "HYPE_TEST_PID_FILE": str(root / "capture-pids"), "HYPE_TEST_DELAY": str(root / "focus-delay")}
         short_capture = root / "short-capture"
         env["HYPE_TEST_SHORT_CAPTURE"] = str(short_capture)
+        env["HYPE_TEST_WORKER_STARTED"] = str(worker_started)
         log = (root / "app.log").open("wb")
         app = subprocess.Popen([executable, "--background"], env=env, stdout=log, stderr=log, start_new_session=True)
         group = Gio.DBusActionGroup.get(Gio.bus_get_sync(Gio.BusType.SESSION, None), "dev.hype.Flow", "/dev/hype/Flow")
@@ -141,11 +142,13 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
 
         try:
             wait(lambda: group.has_action("toggle") and phase("idle"), "ready actions")
+            assert not worker_started.exists(), "Speech worker started before dictation"
             for name in ("toggle", "cancel", "show", "copy-last", "copy-raw", "quit"):
                 assert group.has_action(name), name
             short_capture.touch()
             group.activate_action("toggle", None)
             wait(lambda: phase("recording"), "short recording starts")
+            wait(worker_started.exists, "first dictation starts the speech worker")
             group.activate_action("toggle", None)
             wait(lambda: phase("done"), "short recording rejected")
             assert "Recording too short" in state()[1], state()

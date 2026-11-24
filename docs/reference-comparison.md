@@ -69,7 +69,7 @@ Coverage limits:
 
 ---
 
-## 2. Hype Flow baseline
+## 2. Hype Flow baseline before the accuracy and memory work
 
 | Area | Current implementation |
 |---|---|
@@ -86,9 +86,9 @@ Coverage limits:
 | Output | `wl-copy` plus `wtype` Ctrl+V (Shift+Insert in terminals). The clipboard is restored after 800 ms, guarded by a generation counter. Also: niri focus check, PRIMARY selection, optional trailing space and Enter (`src/output.rs`). |
 | Control | GApplication D-Bus actions `toggle` and `cancel`, bound in niri (`docs/niri.kdl`). Toggle only, no push-to-talk. |
 | UI | GTK4 layer-shell overlay and notch, and a settings window. A "Copy original" action recovers the text before cleanup. |
-| Evaluation | `src/bin/evaluate.rs` and `tools/evaluate.py`, a word-level evaluator, with an 88-word smoke corpus. |
+| Evaluation | The Rust and Python word-level evaluators used an 88-word smoke corpus. |
 
-Not present today:
+Missing at this checkpoint:
 
 - Streaming or partial results.
 - Number formatting (inverse text normalization, ITN).

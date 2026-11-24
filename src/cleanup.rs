@@ -11,7 +11,7 @@ use crate::vocabulary::{
 };
 
 static COMMON_WORDS: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| include_str!("dictation/common_words.txt").lines().collect());
+    LazyLock::new(|| include_str!("../assets/common_words.txt").lines().collect());
 const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so"];
 
 pub const DEFAULT_FILTERS: &str = "um, uh, erm, umm, uhh";

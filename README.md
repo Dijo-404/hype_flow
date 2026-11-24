@@ -1,20 +1,20 @@
 # Hype Flow
 
-Native offline English dictation for niri. Open **Hype Flow** from your launcher. Press **Super + Ctrl + Space**, speak, then press again to paste into the original window. **Super + Ctrl + Escape** cancels.
+Native offline English dictation for niri. Open **Hype Flow** from your launcher. Press **Alt + Space**, speak, then press again to paste into the original window. **Super + Ctrl + Escape** cancels.
 
-The default model is **Parakeet 110M CTC English INT8**. Its installed model files total **131.7 MB**. It supports English with punctuation and capitalization. The CPU runtime stays loaded between recordings, unloads after 10 idle minutes by default (Speech model → Memory), and reloads in parallel with the next recording. It exchanges audio and results over anonymous pipes.
+The default model is **Parakeet 110M CTC English INT8**. Its installed model files total **131.7 MB**. It supports English with punctuation and capitalization. At login, Hype Flow starts without loading the speech model. The CPU worker loads in parallel with the first recording and unloads after 10 idle minutes by default (Speech model → Memory). It exchanges audio and results over anonymous pipes.
 
 ## Desktop setup
 
-On first use, open **Speech model** and choose **Install selected model**. Setup verifies the selected archive and pinned native runtime before activating the model. To switch models, choose **110M TDT** or **Unified**, save the choice, and install it. Existing installations with a saved model continue using it until you install a different one.
+The Hype Niri `hype-flow` installer option sets up the model, shortcuts, and background startup. For manual setup in the app, open **Speech model** and choose **Install selected model**. Setup verifies the selected archive and pinned native runtime before activating the model. To switch models, choose **110M TDT** or **Unified**, save the choice, and install it. Existing installations with a saved model continue using it until you install a different one.
 
 CTC worker revision 8 preserves the original pauses within each decode piece. After updating Hype Flow, refresh an older CTC worker through **Speech model** by installing the CTC profile again. Setup reuses a verified cached archive when available.
 
 With silence cutting enabled, Parakeet CTC uses a fixed 32 ms digital lead-in before decoding. This keeps added all-zero audio from shifting the decode boundaries. Dictation duration and word timestamps still refer to the original recording.
 
-Choose **Configure niri** under **Shortcuts** to add bindings and autostart. The app validates the resulting configuration and saves a backup. The `hype_niri` branch includes these bindings directly. Existing display settings at `Super + Shift + D` remain available.
+Choose **Configure niri** under **Shortcuts** to add bindings and autostart manually. The app validates the resulting configuration and saves a backup. Existing display settings at `Super + Shift + D` remain available.
 
-Click the current **Dictate** or **Cancel** shortcut under **Shortcuts**, then press the key combination you want, such as `Alt+Space`. Press Escape or click away to cancel capture. Choose **Save changes** to apply the new shortcut. Existing preferences keep the original shortcuts until edited. Changes validate the complete niri configuration, reject conflicts, and back up both the configuration and the managed bindings.
+Click the current **Dictate** or **Cancel** shortcut under **Shortcuts**, then press the key combination you want, such as `Alt+F9`. Press Escape or click away to cancel capture. Choose **Save changes** to apply the new shortcut. Existing preferences keep the original shortcuts until edited. Changes validate the complete niri configuration, reject conflicts, and back up both the configuration and the managed bindings.
 
 For Alt-based shortcuts in VS Code, set `"window.customMenuBarAltFocus": false` in VS Code's settings. Otherwise, releasing Alt can focus the menu bar and leave Chat without keyboard focus, so dictation starts but its text does not reach the Chat input.
 
@@ -33,29 +33,28 @@ Requires Linux x86_64, a current stable Rust toolchain, GTK4, gtk4-layer-shell, 
 ```sh
 sudo pacman -S base-devel rust gtk4 gtk4-layer-shell pipewire wl-clipboard wtype bubblewrap
 make install
+~/.local/bin/hype-flow --setup
 ```
 
-The installer creates the desktop launcher and installs release binaries without editing compositor settings. The installed application and first-use model setup do not require Python. The developer evaluator uses Python for the pinned Whisper English scoring normalizer. An existing launcher and desktop entry are retained under `$XDG_DATA_HOME/hype-flow/rollback`; model and configuration files stay in place.
+`make install` creates the desktop launcher and installs release binaries. Run `--setup` to download the configured model, validate and configure the Niri shortcuts, and enable background startup at login. Setup works from a terminal without a graphical session. It reuses installed models and saved shortcuts. The developer evaluator uses Python for the pinned Whisper English scoring normalizer. An existing launcher and desktop entry are retained under `$XDG_DATA_HOME/hype-flow/rollback`.
 
 ## Project layout
 
 ```text
 src/*.rs               Rust application, GTK4 UI and speech pipeline
 src/bin/evaluate.rs    Rust word-error-rate evaluation tool
-src/dictation/         Previous Python application, kept for parity and rollback
 worker/                Rust inference worker and pinned generated API bindings
-src/dictation/native/  Previous C worker, kept as a compatibility reference
-assets/                Embedded stylesheet and logo
-tools/                 Installation and controlled desktop verification
-tests/                 Rust tests, differential fixtures and Python baseline
+assets/                Embedded stylesheet, logo and common-word list
+tools/                 Installation, evaluation and desktop verification tools
+tests/                 Rust tests, regression fixtures and test drivers
 docs/                  Configuration, provenance and migration evidence
 Cargo.toml             Rust package metadata and desktop entry point
 Cargo.lock             Pinned Rust dependency versions
 ```
 
-Developer launch: `cargo build --workspace`, then `cargo run --bin hype-flow`. The installed command remains `hype-flow` for desktop and niri integration; its private flags are not a user-facing CLI workflow. If GTK4 layer-shell is installed under `~/.local`, include `~/.local/lib/pkgconfig` in `PKG_CONFIG_PATH` when invoking Cargo directly; Make sets this automatically.
+For development, run `cargo build --workspace`, then `cargo run --bin hype-flow`. If GTK4 layer-shell is installed under `~/.local`, include `~/.local/lib/pkgconfig` in `PKG_CONFIG_PATH` when invoking Cargo directly. Make sets this automatically.
 
-The migration has two required stages: migrate and verify the application while retaining the C worker, then migrate the application-owned worker to Rust. The worker retains the pinned native inference libraries and process/network isolation. `make release` builds the complete Cargo workspace, including the worker used by first-use model setup. See the [migration design](docs/superpowers/specs/2026-11-21-rust-gtk4-design.md) for acceptance gates.
+`make release` builds the desktop app and the worker used by first-use model setup. The [migration results](docs/migration-results.md) record the Python-to-Rust and C-to-Rust comparisons.
 
 ## Accuracy and limits
 
@@ -93,7 +92,7 @@ The notch receives state and microphone levels over session D-Bus, never transcr
 
 ```sh
 make check
-make check-python  # Previous implementation remains the migration oracle.
+make check-python
 ```
 
 Run `make check-desktop` only inside a controlled Wayland compositor and an isolated D-Bus session. It uses synthetic capture and its own paste target. The desktop driver requires Python/PyGObject only as development test tooling.

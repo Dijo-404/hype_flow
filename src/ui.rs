@@ -284,10 +284,7 @@ impl Home {
         save: Rc<dyn Fn(Config) -> bool>,
     ) -> Rc<Self> {
         let css = gtk::CssProvider::new();
-        // GTK4 removed this GTK3-only property; preserve all other existing styling.
-        css.load_from_string(
-            &include_str!("../assets/settings.css").replace("-gtk-outline-radius: 6px;", ""),
-        );
+        css.load_from_string(include_str!("../assets/settings.css"));
         if let Some(display) = gdk::Display::default() {
             gtk::style_context_add_provider_for_display(
                 &display,

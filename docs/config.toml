@@ -37,7 +37,7 @@ corrections = ""
 
 filter_words = true
 blocked_words = "um, uh, erm, umm, uhh"
-# Optional adjacent repeated-word removal. Verbal restarts are never guessed.
+# Optional adjacent repeated-word removal.
 # Legitimate doubles (had, that, very, no, yes, ha, so) remain unchanged.
 remove_repetitions = false
 # General > Copy original recovers recognition before text cleanup.

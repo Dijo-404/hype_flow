@@ -432,8 +432,20 @@ fn activate(stage: TempDir, targets: &[(PathBuf, PathBuf)]) -> Result<()> {
     Ok(())
 }
 
-pub fn install(progress: impl Fn(&str)) -> Result<(String, String)> {
-    install_variant("unified", progress)
+pub fn ensure_installed(values: &Config) -> Result<()> {
+    if assets_ready(values) {
+        println!("Speech model already installed");
+        return Ok(());
+    }
+    let root = data_dir();
+    let spec = model_spec(&values.model_variant)?;
+    ensure!(
+        Path::new(&values.model) == root.join("models").join(spec.name)
+            && Path::new(&values.server) == root.join("backend/parakeet/recognizer"),
+        "The configured speech model or worker uses a custom path. Repair it or choose a managed model in Hype Flow settings."
+    );
+    install_variant(&values.model_variant, |message| println!("{message}"))?;
+    Ok(())
 }
 
 pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String, String)> {

@@ -3,6 +3,19 @@ fn main() -> gtk::glib::ExitCode {
     unsafe {
         libc::umask(0o077);
     }
+    if std::env::args_os().skip(1).eq(["--setup"]) {
+        return match hype_flow::config::Config::load().and_then(|values| {
+            hype_flow::setup::ensure_installed(&values)?;
+            println!("{}", hype_flow::shortcuts::install()?);
+            Ok(())
+        }) {
+            Ok(()) => gtk::glib::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("Hype Flow setup failed: {error:#}");
+                gtk::glib::ExitCode::FAILURE
+            }
+        };
+    }
     match hype_flow::config::Config::load().and_then(hype_flow::app::run) {
         Ok(code) => code,
         Err(error) => {

@@ -344,8 +344,9 @@ impl AppState {
         if self.session.unloaded {
             self.session.unloaded = false;
             let engine = self.engine.clone();
+            let epoch = engine.recording_epoch();
             self.workers.push(thread::spawn(move || {
-                let _ = engine.ensure();
+                let _ = engine.ensure_scoped(epoch, &|| false);
             }));
         }
         let tx = self.tx.clone();
@@ -1059,7 +1060,10 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
             app.borrow_mut().workers.push(recovery);
         }
         if setup::assets_ready(&values) {
-            app.borrow_mut().warm();
+            let mut app = app.borrow_mut();
+            app.session.ready = true;
+            app.session.unloaded = true;
+            app.publish("idle", "Ready", false, 0.0, 0.0);
         } else {
             app.borrow_mut().publish(
                 "idle",

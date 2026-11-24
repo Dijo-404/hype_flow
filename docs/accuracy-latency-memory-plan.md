@@ -153,7 +153,7 @@ Cause, in `closest()` at `src/cleanup.rs:244-272`:
 - Common words and short words are not excluded.
 - An ambiguous match is not rejected: the first best score wins.
 
-The Python oracle (`src/dictation/cleanup.py:77-92`) behaves the same way.
+The Python baseline had the same behavior.
 
 ### 4.2 Long single-pass decoding (upstream; unmeasured for Hype Flow's model)
 
@@ -325,8 +325,6 @@ never audio).
      Sussurro `internal/llm/correction.go:465-487`.
   5. Optional: use DoubleMetaphone instead of soundex. Source: Voxtype uses
      `rphonetic::DoubleMetaphone`. It distinguishes more sounds than soundex.
-- **Apply the same change to the Python oracle**
-  (`src/dictation/cleanup.py:77-92`) if it is kept as an oracle.
 - **Tests:**
   - Add the three false positives above to `tests/fixtures/cleanup.json`.
   - Keep the existing true positives passing: "Charge B" → ChargeBee,

@@ -408,7 +408,7 @@ fn exercise_services(root: &Path) {
     fs::write(&config, "include \"keys.kdl\"\n").unwrap();
     fs::write(
         niri.join("keys.kdl"),
-        "binds { Mod+Ctrl+Space { spawn \"test\"; }; }\n",
+        "binds { Alt+Space { spawn \"test\"; }; }\n",
     )
     .unwrap();
     assert!(
@@ -447,21 +447,22 @@ fn exercise_services(root: &Path) {
     }));
 
     let mut values = Config {
-        dictation_shortcut: "Alt+Space".into(),
+        dictation_shortcut: "Mod+Ctrl+Space".into(),
         ..Config::default()
     };
     let original_bindings = fs::read_to_string(&bindings).unwrap();
+    assert!(original_bindings.contains("Alt+Space"));
     fs::create_dir_all(&preferences).unwrap();
     assert!(shortcuts::save(&values).is_err());
     assert_eq!(fs::read_to_string(&bindings).unwrap(), original_bindings);
     fs::remove_dir(&preferences).unwrap();
     shortcuts::save(&values).unwrap();
-    assert_eq!(Config::load().unwrap().dictation_shortcut, "Alt+Space");
+    assert_eq!(Config::load().unwrap().dictation_shortcut, "Mod+Ctrl+Space");
     let installed = fs::read_to_string(&bindings).unwrap();
     shortcuts::install().unwrap();
     assert_eq!(fs::read_to_string(&bindings).unwrap(), installed);
-    assert!(installed.contains("Alt+Space"));
-    assert!(!installed.contains("Mod+Ctrl+Space"));
+    assert!(installed.contains("Mod+Ctrl+Space"));
+    assert!(!installed.contains("Alt+Space"));
     assert!(installed.contains("Mod+Ctrl+Escape"));
     let saved_toggle_preferences = fs::read(&preferences).unwrap();
     fs::write(root.join("reject-hold"), "unsupported compositor").unwrap();

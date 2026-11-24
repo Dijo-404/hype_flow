@@ -1,9 +1,9 @@
-// Add at the top level. Install first: python3 tools/install.py
+// Run make install first, then add this line at the top level.
 spawn-at-startup "hype-flow" "--background"
 
 // Merge these entries into your existing binds block.
 binds {
     // gapplication signals the running app directly; hype-flow starts it when it is not running.
-    Mod+Ctrl+Space repeat=false hotkey-overlay-title="Dictate offline" { spawn "sh" "-c" "gapplication action dev.hype.Flow toggle 2>/dev/null || exec hype-flow --toggle"; }
+    Alt+Space repeat=false hotkey-overlay-title="Dictate offline" { spawn "sh" "-c" "gapplication action dev.hype.Flow toggle 2>/dev/null || exec hype-flow --toggle"; }
     Mod+Ctrl+Escape repeat=false hotkey-overlay-title="Cancel dictation" { spawn "sh" "-c" "gapplication action dev.hype.Flow cancel 2>/dev/null || exec hype-flow --cancel"; }
 }

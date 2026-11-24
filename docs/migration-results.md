@@ -1,5 +1,8 @@
 # Hype Flow migration verification
 
+The migration plans, Python application, C worker, and parity scripts are
+available in Git at revision `7938c5a8e883f18499aded4b0884d8c2ca668d0f`.
+
 ## Phase 1: Rust/GTK4 application
 
 The application migration passed its functional, build, source-review and
@@ -36,7 +39,7 @@ and sherpa-onnx 1.13.8 model/runtime were retained for this checkpoint.
   score-format cases also matched. Native greedy, vocabulary boosting, VAD,
   denoising, and combined modes matched Python raw and cleaned transcripts
   with zero word errors across the 88-word smoke corpus.
-- The previous Python suite remains available as an oracle. All 76 tests,
+- The Python baseline suite served as an oracle. All 76 tests,
   including its three desktop tests, passed under an isolated D-Bus/Wayland
   session and empty XDG configuration. An initial legacy desktop run inherited
   the owner's non-default preferences and failed two default-value assertions;

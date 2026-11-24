@@ -8,12 +8,12 @@ test:
 	$(CARGO) test --workspace
 
 check: test
-	$(CARGO) fmt --check
+	$(CARGO) fmt --all --check
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
 check-python:
-	PYTHONPATH=src:. python3 -m unittest discover -s tests -v
-	python3 -m compileall -q src/dictation tools
+	python3 -m unittest discover -s tests -v
+	python3 -m compileall -q tests tools
 
 release:
 	$(CARGO) build --release --workspace

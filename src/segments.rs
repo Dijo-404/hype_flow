@@ -1,8 +1,6 @@
 use std::borrow::Cow;
 
 const SECOND: usize = 16_000 * 2;
-const MAXIMUM: usize = 15 * SECOND;
-const ALLOWANCE: usize = SECOND / 2;
 const FRAME: usize = SECOND / 100;
 const PAUSE_FRAMES: usize = 10;
 // One Silero VAD window of mono PCM16.
@@ -69,24 +67,6 @@ fn pause_cut(pcm: &[u8], start: usize, limit: usize) -> usize {
         return limit;
     }
     start + (run_start + run_end + PAUSE_FRAMES) / 2 * FRAME
-}
-
-pub fn split_at_pauses(pcm: &[u8]) -> Vec<&[u8]> {
-    let count = pcm.len().saturating_sub(ALLOWANCE).div_ceil(MAXIMUM);
-    let mut slices = Vec::with_capacity(count);
-    let mut start = 0;
-    while pcm.len() - start > MAXIMUM + ALLOWANCE {
-        let limit = start + MAXIMUM;
-        let after = count - slices.len() - 1;
-        let earliest = (limit - 4 * SECOND).max(pcm.len() - after * MAXIMUM - ALLOWANCE);
-        let cut = pause_cut(pcm, earliest, limit);
-        slices.push(&pcm[start..cut]);
-        start = cut;
-    }
-    if start < pcm.len() {
-        slices.push(&pcm[start..]);
-    }
-    slices
 }
 
 /// Bound every decode, including audio without VAD, and prefer quiet cut points.

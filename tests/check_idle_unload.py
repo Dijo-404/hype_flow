@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the real five-minute idle timer with the installed model and C worker."""
+"""Check lazy startup and five-minute idle unload with the installed model and worker."""
 import json
 import argparse
 import os
@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 
-from benchmark_migration import create_capture, process_tree_memory
+from benchmark_desktop import create_capture, process_tree_memory
 from ui_driver import Gio, GLib, wait
 
 REPO = Path(__file__).resolve().parents[1]
@@ -26,7 +26,9 @@ def inside(root):
     }
     (configuration / "config.toml").write_text("".join(f"{key} = {json.dumps(value)}\n" for key, value in settings.items()))
     shim = create_capture(root, Path("/tmp/hype-flow-eval/jfk.wav"))
-    environment = {**os.environ, "XDG_CONFIG_HOME": str(root / "config"), "PATH": str(shim) + ":" + os.environ["PATH"], "HYPE_FLOW_BENCHMARK_ROOT": str(root)}
+    environment = {**os.environ, "XDG_CONFIG_HOME": str(root / "config"),
+                   "PATH": str(shim) + ":" + os.environ["PATH"],
+                   "HYPE_FLOW_BENCHMARK_ROOT": str(root), "HYPE_FLOW_BENCHMARK_PACE": "1"}
     app = subprocess.Popen([str(REPO / "target/release/hype-flow"), "--background"], env=environment)
     group = Gio.DBusActionGroup.get(Gio.bus_get_sync(Gio.BusType.SESSION, None), "dev.hype.Flow", "/dev/hype/Flow")
     def phase(name):
@@ -34,7 +36,11 @@ def inside(root):
         state = group.get_action_state("status")
         return state and state.unpack()[0] == name
     try:
-        wait(lambda: phase("idle"), "loaded idle", timeout=90)
+        wait(lambda: phase("idle"), "background ready")
+        assert not any(row["executable"] == "recognizer" for row in process_tree_memory(app.pid)["processes"])
+        group.activate_action("toggle", None)
+        wait(lambda: phase("recording"), "first recording starts")
+        wait(lambda: phase("done"), "first recording finishes", timeout=90)
         loaded = process_tree_memory(app.pid)
         assert any(row["executable"] == "recognizer" for row in loaded["processes"])
         began = time.monotonic()

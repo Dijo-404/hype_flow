@@ -1,24 +1,7 @@
 // Adapted from Voxtype (MIT), copyright 2025 Peter Jackson.
 // Original license: ../docs/licenses/voxtype.txt.
-// Restart and repetition disfluency removal.
-//
-// Speakers who interrupt themselves usually restart the phrase by repeating
-// a word they already said, and the ASR engine plants a sentence boundary at
-// the interruption point because the speaker paused there:
-//
-// ```text
-// ... and the independent tool. the independent booking migration tool
-//         ^^^^^^^^^^^^^^^^^^^^^^  reparandum + false boundary
-//                                 ^^^^^^^^^^^^^^^^ repair restarts with a repeat
-// ```
-//
-// Deleting the reparandum and its boundary yields the sentence the speaker
-// meant. This module implements that, plus the simpler adjacent-repetition
-// case ("the the the") and explicit editing phrases ("I'm sorry", "scratch
-// that").
-//
-// Everything here is deliberately conservative: a false positive silently
-// deletes words the user said, which is worse than leaving a disfluency in.
+// A pause can appear as a sentence boundary inside a spoken restart.
+// Require strong evidence before deleting words from the transcript.
 
 use regex::Regex;
 use std::sync::OnceLock;
