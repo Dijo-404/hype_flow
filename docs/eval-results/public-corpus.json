@@ -1,0 +1,44 @@
+{
+  "dataset": "hf-audio/open-asr-leaderboard",
+  "revision": "de79e57adf9983993bcc72586d7313460825f5eb",
+  "seed": 20261015,
+  "manifest_sha256": "228bcc3087b249e8895fd506ab4a3057d4d19300e203ad7fb114ace2a10b2f1b",
+  "clips": 1400,
+  "sets": {
+    "ami": {
+      "clips": 200,
+      "audio_seconds": 773.46
+    },
+    "earnings22": {
+      "clips": 200,
+      "audio_seconds": 1546.7234375000003
+    },
+    "gigaspeech": {
+      "clips": 200,
+      "audio_seconds": 1410.8689999999995
+    },
+    "librispeech_clean": {
+      "clips": 200,
+      "audio_seconds": 1486.3350624999994
+    },
+    "librispeech_other": {
+      "clips": 200,
+      "audio_seconds": 1469.0498125
+    },
+    "spgispeech": {
+      "clips": 200,
+      "audio_seconds": 1926.0300000000009
+    },
+    "voxpopuli": {
+      "clips": 200,
+      "audio_seconds": 1916.9720624999993
+    }
+  },
+  "audio_seconds": 10529.439375,
+  "minimum_seconds": 0.09,
+  "maximum_seconds": 38.83525,
+  "shorter_than_300ms": 69,
+  "shorter_than_1s": 162,
+  "sampling": "Fixed-seed shuffle of rows from first/middle/final shard of each dataset; exactly 200 eligible clips per dataset.",
+  "limitations": "Engine benchmark retains unpadded short public clips; app capture minimum of 300 ms is not applied. Distinct sampling and no under-1-second padding mean published Sayso WER is contextual, not an identical-corpus comparison. Owner voice not collected."
+}

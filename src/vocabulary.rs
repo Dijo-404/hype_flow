@@ -103,7 +103,7 @@ pub fn hotwords(value: &str) -> Result<String> {
         let lowercase = term.to_lowercase();
         let uppercase = uppercase_first(&term);
         for variant in [term, lowercase, uppercase] {
-            if !result.contains(&variant) {
+            if result.len() < 100 && !result.contains(&variant) {
                 result.push(variant);
             }
         }
@@ -212,4 +212,26 @@ fn format_score(score: f32) -> String {
     }
     let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
     format!("{mantissa}e{exponent:+03}")
+}
+
+#[cfg(test)]
+mod hotword_tests {
+    use super::*;
+
+    #[test]
+    fn native_variants_stay_within_one_hundred_entries() {
+        let list = (0..100)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let result = hotwords(&list).unwrap();
+        assert_eq!(result.lines().count(), 100);
+        assert_eq!(result.lines().collect::<HashSet<_>>().len(), 100);
+        let invalid_tail = (0..99)
+            .map(|i| format!("word{i}"))
+            .chain(["bad :99".into()])
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(hotwords(&invalid_tail).is_err());
+    }
 }

@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "audio_seconds": 63.53725,
+      "word_lcs": 1.0,
+      "checkpoints": 7,
+      "matched_in_order": 7,
+      "whisper_wer": 0.0,
+      "peak_worker_rss_kib": 1091548
+    },
+    {
+      "audio_seconds": 124.1835625,
+      "word_lcs": 0.9967532467532467,
+      "checkpoints": 12,
+      "matched_in_order": 12,
+      "whisper_wer": 0.0,
+      "peak_worker_rss_kib": 1091548
+    },
+    {
+      "audio_seconds": 186.3208125,
+      "word_lcs": 0.997979797979798,
+      "checkpoints": 21,
+      "matched_in_order": 21,
+      "whisper_wer": 0.00202020202020202,
+      "peak_worker_rss_kib": 1091548
+    }
+  ],
+  "passed": true,
+  "selection": "40 distinct LibriSpeech-clean clips with exact strict words in individual baseline decode. Seed 20261015, 0.2\u20131 s gaps. Boundary smoke only.",
+  "memory_note": "Worker high-water RSS is cumulative across the three cases in order of duration."
+}

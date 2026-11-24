@@ -128,7 +128,7 @@ fn check_conflicts(
     Ok(())
 }
 
-fn bindings(launcher: &Path, keys: &[String; 2]) -> Result<String> {
+fn bindings(launcher: &Path, keys: &[String; 2], hold: bool) -> Result<String> {
     let launcher = path_string(launcher)?;
     let executable = serde_json::to_string(launcher)?;
     let quoted = format!("'{}'", launcher.replace('\'', "'\"'\"'"));
@@ -142,10 +142,20 @@ fn bindings(launcher: &Path, keys: &[String; 2]) -> Result<String> {
             serde_json::to_string(&script)?
         ))
     };
+    let dictate = if hold {
+        // Native press/release blocks are validated before touching saved binds.
+        format!(
+            "press {{ {}; }}; release {{ {}; }};",
+            command("press")?,
+            command("release")?
+        )
+    } else {
+        format!("{};", command("toggle")?)
+    };
     Ok(format!(
         r#"{HEADER}spawn-at-startup {executable} "--background"
 binds {{
-    {} repeat=false hotkey-overlay-title="Dictate offline" {{ {}; }}
+    {} repeat=false hotkey-overlay-title="Dictate offline" {{ {} }}
     {} repeat=false hotkey-overlay-title="Cancel dictation" {{ {}; }}
 }}
 window-rule {{
@@ -156,7 +166,7 @@ window-rule {{
 }}
 "#,
         keys[0],
-        command("toggle")?,
+        dictate,
         keys[1],
         command("cancel")?
     ))
@@ -223,7 +233,10 @@ fn install_with(changes: Option<&Config>) -> Result<String> {
 
     let temporary = Builder::new().prefix(".hype-flow-").tempdir_in(parent)?;
     let generated = temporary.path().join("bindings.kdl");
-    fs::write(&generated, bindings(&launcher, &keys)?)?;
+    fs::write(
+        &generated,
+        bindings(&launcher, &keys, values.dictation_mode == "hold")?,
+    )?;
     let staged_include = format!(
         "include {}",
         serde_json::to_string(path_string(&generated)?)?
@@ -258,6 +271,12 @@ fn install_with(changes: Option<&Config>) -> Result<String> {
             .rev()
             .nth(699)
             .map_or(0, |(offset, _)| offset);
+        if values.dictation_mode == "hold" {
+            bail!(
+                "Push-to-talk requires niri with native press/release bindings. Existing shortcuts were kept. niri rejected the shortcut configuration: {}",
+                &diagnostic[first..]
+            );
+        }
         bail!(
             "niri rejected the shortcut configuration: {}",
             &diagnostic[first..]
@@ -335,7 +354,32 @@ fn install_with(changes: Option<&Config>) -> Result<String> {
         return Err(error).context("Could not save settings; previous shortcuts restored");
     }
     Ok(format!(
-        "Shortcuts ready. {} starts dictation. A backup of your niri config was saved.",
-        keys[0]
+        "Shortcuts ready. {} {}. A backup of your niri config was saved.",
+        keys[0],
+        if values.dictation_mode == "hold" {
+            "holds dictation until released"
+        } else {
+            "starts dictation"
+        }
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_hold_binds_have_distinct_press_and_release_actions() {
+        let keys = ["Alt+Space".into(), "Ctrl+Escape".into()];
+        let hold = bindings(Path::new("/home/test/hype-flow"), &keys, true).unwrap();
+        assert!(hold.contains("press { spawn"));
+        assert!(hold.contains("release { spawn"));
+        assert!(hold.contains("dev.hype.Flow press"));
+        assert!(hold.contains("dev.hype.Flow release"));
+        assert!(hold.contains("}; release {"));
+        assert!(!hold.contains("dev.hype.Flow toggle"));
+        let toggle = bindings(Path::new("/home/test/hype-flow"), &keys, false).unwrap();
+        assert!(toggle.contains("dev.hype.Flow toggle"));
+        assert!(!toggle.contains("press {"));
+    }
 }

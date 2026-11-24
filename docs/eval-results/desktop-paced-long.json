@@ -1,0 +1,135 @@
+{
+  "metadata": {
+    "repetitions": 2,
+    "commands": {
+      "rust": [
+        "/home/dj/projects/hype_flow/target/release/hype-flow"
+      ]
+    },
+    "audio": "/tmp/hype-flow-eval/long.wav",
+    "audio_sha256": "84b4c7d891e7bd3ab5a1bc9793492626c896a22890eeda955aa6cd0e5f862e64",
+    "audio_seconds": 34.5,
+    "paced_capture": true,
+    "worker": "/home/dj/projects/hype_flow/.migration/completion-assets/backend/parakeet/recognizer",
+    "worker_sha256": "9b5665daa09b8664bafe399d6091099ae6e9b50578c50b5dede783c7a80b76e7",
+    "model": "/home/dj/projects/hype_flow/.migration/completion-assets/models/parakeet-unified-en-int8",
+    "rust_sha256": "f45deae87487abf6fa9cb6fc919a6d975edc6437a0dc40b097968d5cfa6789a0"
+  },
+  "samples": {
+    "rust": {
+      "ready_with_model": [
+        {
+          "startup_ms": 3422.191649,
+          "rss_kib": 1034772,
+          "pss_kib": 997732,
+          "processes": [
+            {
+              "pid": 2768659,
+              "executable": "hype-flow",
+              "rss_kib": 62040,
+              "pss_kib": 32364
+            },
+            {
+              "pid": 2768715,
+              "executable": "bwrap",
+              "rss_kib": 2172,
+              "pss_kib": 155
+            },
+            {
+              "pid": 2768716,
+              "executable": "bwrap",
+              "rss_kib": 1336,
+              "pss_kib": 132
+            },
+            {
+              "pid": 2768717,
+              "executable": "recognizer",
+              "rss_kib": 969224,
+              "pss_kib": 965081
+            }
+          ]
+        },
+        {
+          "startup_ms": 2348.412625,
+          "rss_kib": 1034536,
+          "pss_kib": 997468,
+          "processes": [
+            {
+              "pid": 2770042,
+              "executable": "hype-flow",
+              "rss_kib": 61748,
+              "pss_kib": 32162
+            },
+            {
+              "pid": 2770077,
+              "executable": "bwrap",
+              "rss_kib": 2168,
+              "pss_kib": 151
+            },
+            {
+              "pid": 2770078,
+              "executable": "bwrap",
+              "rss_kib": 1332,
+              "pss_kib": 127
+            },
+            {
+              "pid": 2770079,
+              "executable": "recognizer",
+              "rss_kib": 969288,
+              "pss_kib": 965028
+            }
+          ]
+        }
+      ],
+      "idle_without_model": [
+        {
+          "startup_ms": 1970.817282,
+          "rss_kib": 61468,
+          "pss_kib": 32128,
+          "processes": [
+            {
+              "pid": 2769989,
+              "executable": "hype-flow",
+              "rss_kib": 61468,
+              "pss_kib": 32128
+            }
+          ]
+        },
+        {
+          "startup_ms": 1689.553572,
+          "rss_kib": 61908,
+          "pss_kib": 32316,
+          "processes": [
+            {
+              "pid": 2770031,
+              "executable": "hype-flow",
+              "rss_kib": 61908,
+              "pss_kib": 32316
+            }
+          ]
+        }
+      ],
+      "prerecorded_dictation": [
+        {
+          "shortcut_first_frame_ms": 1078.212679,
+          "decode_cleanup_ms": 501.732548,
+          "delivery_ms": 7189.987935,
+          "capture_end_to_paste_ms": 7696.037404,
+          "raw_transcript_sha256": "94724341ed1c5ee1d88760179fa14b7973fbea52a64a80e514c19bc8ed623ce4"
+        },
+        {
+          "shortcut_first_frame_ms": 164.625295,
+          "decode_cleanup_ms": 489.322363,
+          "delivery_ms": 7825.128176,
+          "capture_end_to_paste_ms": 8326.959556,
+          "raw_transcript_sha256": "94724341ed1c5ee1d88760179fa14b7973fbea52a64a80e514c19bc8ed623ce4"
+        }
+      ],
+      "capture_end_to_paste_percentiles_ms": {
+        "p50": 7696.037404,
+        "p95": 8326.959556
+      }
+    }
+  },
+  "limitations": "Paced capture shim and isolated GTK text target. 2 measured replay samples after warm-up. Clipboard helper tracing adds overhead; nested compositor stalls occurred during runs."
+}

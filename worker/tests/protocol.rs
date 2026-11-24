@@ -55,13 +55,26 @@ fn worker(stage: &TempDir) -> Command {
     command
 }
 
+fn spawn(command: &mut Command) -> std::process::Child {
+    // Parallel test children can briefly inherit a staged executable's write FD.
+    for _ in 0..5 {
+        match command.spawn() {
+            Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            result => return result.unwrap(),
+        }
+    }
+    command.spawn().unwrap()
+}
+
 fn run(mut command: Command, input: &[u8]) -> Output {
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = spawn(
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     child.stdin.take().unwrap().write_all(input).unwrap();
     child.wait_with_output().unwrap()
 }
@@ -103,6 +116,10 @@ fn invalid_options_fail_before_loading_native_library() {
         &["model", "2", "--hotwords", "words"],
         &["model", "2", "--hotwords", "words", "NaN"],
         &["model", "2", "--hotwords", "words", "3.1"],
+        &["model", "2", "--feature-dim", "79"],
+        &["model", "2", "--feature-dim", "129"],
+        &["model", "2", "--provider", "cuda"],
+        &["model", "2", "--provider", "cpu:/etc/passwd"],
         &["model", "2", "--vad"],
         &["model", "2", "--denoise"],
     ] {
@@ -147,13 +164,13 @@ fn readiness_and_results_flush_before_eof_and_pcm_is_signed_little_endian() {
     stdout
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    let mut child = worker(&stage)
-        .args(["model", "  +2"])
-        .stdin(Stdio::piped())
-        .stdout(OwnedFd::from(child_stdout))
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = spawn(
+        worker(&stage)
+            .args(["model", "  +2"])
+            .stdin(Stdio::piped())
+            .stdout(OwnedFd::from(child_stdout))
+            .stderr(Stdio::piped()),
+    );
     let mut stdin = child.stdin.take().unwrap();
     assert_eq!(frame(&mut stdout), READY);
     for (samples, expected) in [
@@ -225,7 +242,35 @@ fn boosted_denoised_audio_is_windowed_and_overlapping_padding_is_deduplicated() 
 }
 
 #[test]
-fn incompatible_denoised_audio_and_empty_vad_fall_back_to_original_pcm() {
+fn ctc_keeps_original_samples_between_vad_ranges() {
+    let stage = staged_worker();
+    let mut command = worker(&stage);
+    command.env("FAKE_SHERPA_MODE", "ctc-pause").args([
+        "model",
+        "2",
+        "--ctc",
+        "--feature-dim",
+        "80",
+        "--vad",
+        "vad",
+        "--denoise",
+        "denoise",
+    ]);
+    let output = run(command, &pcm(&(0..20_000).collect::<Vec<_>>()));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut stdout = output.stdout.as_slice();
+    assert_eq!(frame(&mut stdout), READY);
+    let result: serde_json::Value = serde_json::from_slice(&frame(&mut stdout)).unwrap();
+    assert_eq!(result["text"], "paused");
+    assert_eq!(result["timestamps"], serde_json::json!([0.75]));
+}
+
+#[test]
+fn empty_vad_returns_empty_even_when_denoiser_is_incompatible() {
     let stage = staged_worker();
     let mut command = worker(&stage);
     command.env("FAKE_SHERPA_MODE", "fallback").args([
@@ -244,12 +289,9 @@ fn incompatible_denoised_audio_and_empty_vad_fall_back_to_original_pcm() {
     );
     let mut stdout = output.stdout.as_slice();
     assert_eq!(frame(&mut stdout), READY);
-    assert_eq!(frame(&mut stdout), b"{\"samples\":[-1.0, 0.9999695, 0.0]}");
+    assert_eq!(frame(&mut stdout), b"{\"text\":\"\"}");
     assert!(stdout.is_empty());
-    assert_released(
-        &output,
-        &["audio", "result", "stream", "vad", "denoiser", "recognizer"],
-    );
+    assert_released(&output, &["audio", "vad", "denoiser", "recognizer"]);
 }
 
 #[test]
@@ -283,4 +325,136 @@ fn oversized_native_result_releases_result_and_stream() {
     assert_eq!(frame(&mut stdout), READY);
     assert!(stdout.is_empty());
     assert_released(&output, &["result", "stream", "recognizer"]);
+}
+
+#[test]
+fn warmup_decode_finishes_before_ready_and_is_not_returned_as_a_transcript() {
+    let stage = staged_worker();
+    let mut command = worker(&stage);
+    command.args(["model", "2", "--warmup"]);
+    let output = run(command, &pcm(&[16384, -16384, 1]));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut stdout = output.stdout.as_slice();
+    assert_eq!(frame(&mut stdout), READY);
+    assert_eq!(
+        frame(&mut stdout),
+        b"{\"samples\":[0.5, -0.5, 3.0517578e-5]}"
+    );
+    assert!(stdout.is_empty());
+    assert_released(
+        &output,
+        &["result", "stream", "result", "stream", "recognizer"],
+    );
+}
+
+#[test]
+fn gain_only_mode_passes_normalized_pcm_to_recognizer() {
+    let stage = staged_worker();
+    let mut command = worker(&stage);
+    command.args(["model", "2", "--normalize-gain"]);
+    let output = run(command, &pcm(&[32, -32, 0]));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut stdout = output.stdout.as_slice();
+    assert_eq!(frame(&mut stdout), READY);
+    assert_eq!(
+        frame(&mut stdout),
+        b"{\"samples\":[0.009765625, -0.009765625, 0.0]}"
+    );
+    assert!(stdout.is_empty());
+    assert_released(&output, &["result", "stream", "recognizer"]);
+}
+
+#[test]
+fn audible_empty_vad_can_retry_once_but_default_still_rejects_it() {
+    for retry in [false, true] {
+        let stage = staged_worker();
+        let mut command = worker(&stage);
+        command
+            .env("FAKE_SHERPA_MODE", "energy-retry")
+            .args(["model", "2", "--vad", "vad"]);
+        if retry {
+            command.arg("--soft-speech-retry");
+        }
+        let output = run(command, &pcm(&vec![1000; 1600]));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut stdout = output.stdout.as_slice();
+        assert_eq!(frame(&mut stdout), READY);
+        let result = frame(&mut stdout);
+        if retry {
+            assert!(String::from_utf8_lossy(&result).contains("\"count\":1600"));
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr)
+                    .matches("drop stream")
+                    .count(),
+                1
+            );
+        } else {
+            assert_eq!(result, b"{\"text\":\"\"}");
+        }
+    }
+}
+
+#[test]
+fn low_memory_model_can_select_eighty_feature_bins() {
+    let stage = staged_worker();
+    let mut command = worker(&stage);
+    command
+        .env("FAKE_SHERPA_MODE", "feature-80")
+        .args(["model", "2", "--feature-dim", "80"]);
+    let output = run(command, &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(frame(&mut output.stdout.as_slice()), READY);
+}
+
+#[test]
+fn audible_empty_recognition_retries_exactly_once() {
+    for retry in [false, true] {
+        let stage = staged_worker();
+        let mut command = worker(&stage);
+        command
+            .env("FAKE_SHERPA_MODE", "empty-first")
+            .args(["model", "2"]);
+        if retry {
+            command.arg("--soft-speech-retry");
+        }
+        let output = run(command, &pcm(&vec![1000; 1600]));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut stdout = output.stdout.as_slice();
+        assert_eq!(frame(&mut stdout), READY);
+        let result = frame(&mut stdout);
+        assert_eq!(
+            result,
+            if retry {
+                &b"{\"text\":\"recovered\"}"[..]
+            } else {
+                &b"{\"text\":\"\"}"[..]
+            }
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr)
+                .matches("drop stream")
+                .count(),
+            if retry { 2 } else { 1 }
+        );
+    }
 }

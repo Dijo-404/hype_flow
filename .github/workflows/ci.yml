@@ -1,0 +1,31 @@
+name: Check
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install GTK and layer shell build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwayland-dev wayland-protocols meson ninja-build pkg-config python3
+      - uses: actions/checkout@v4
+        with:
+          repository: wmww/gtk4-layer-shell
+          ref: 69ad9a02a8c31ac2d3db6710f43b3d8434559e46
+          path: .migration/gtk4-layer-shell
+      - name: Build pinned GTK4 layer shell
+        run: |
+          meson setup .migration/layer-shell-build .migration/gtk4-layer-shell --prefix=/usr/local -Dintrospection=false -Dvapi=false -Dexamples=false -Ddocs=false -Dtests=false
+          meson compile -C .migration/layer-shell-build
+          sudo meson install -C .migration/layer-shell-build
+          sudo ldconfig
+      - run: make check
+      - run: make check-python

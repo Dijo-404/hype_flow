@@ -1,14 +1,17 @@
-use crate::backend::{PCM_LIMIT, RATE};
+use crate::backend::{Engine, PCM_LIMIT, RATE, Transcription};
 use crate::process::{CHILD_GRACE, ChildGroup, POLL_INTERVAL, nonblocking, poll, run_command};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::io::{self, Read};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::ExitStatusExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use unicode_casefold::UnicodeCaseFold;
@@ -61,6 +64,12 @@ pub fn sources() -> Vec<(String, String)> {
     found
 }
 
+struct PieceQueue {
+    sender: mpsc::SyncSender<Vec<u8>>,
+    maximum_seconds: usize,
+    ctc: bool,
+}
+
 struct Session {
     pcm: VecDeque<u8>,
     started: Instant,
@@ -71,6 +80,9 @@ struct Session {
     squares: u64,
     on_frame: FrameCallback,
     on_end: EndCallback,
+    pieces: Option<PieceQueue>,
+    spool: Option<File>,
+    spool_failure: Option<String>,
 }
 
 impl Session {
@@ -85,6 +97,9 @@ impl Session {
             squares: 0,
             on_frame,
             on_end,
+            pieces: None,
+            spool: None,
+            spool_failure: None,
         }
     }
 
@@ -99,10 +114,28 @@ impl Session {
         self.received = true;
         let accepted = data.len().min(PCM_LIMIT - self.recorded);
         let data = &data[..accepted];
+        if let Some(spool) = &mut self.spool
+            && let Err(error) = spool.write_all(data)
+        {
+            self.spool_failure = Some(format!("Could not save recovery audio: {error}"));
+            return (None, self.end());
+        }
         self.recorded += accepted;
         let overflow = (self.pcm.len() + accepted).saturating_sub(PCM_LIMIT);
         self.pcm.drain(..overflow);
         self.pcm.extend(data);
+        if let Some(queue) = &self.pieces
+            && let Some(cut) = crate::segments::eager_cut(
+                self.pcm.make_contiguous(),
+                queue.maximum_seconds,
+                queue.ctc,
+            )
+        {
+            let piece = self.pcm.range(..cut).copied().collect();
+            if queue.sender.try_send(piece).is_ok() {
+                self.pcm.drain(..cut);
+            }
+        }
 
         let (first, tail) = data.split_at((CHUNK - self.frame_bytes).min(accepted));
         self.squares += squares(first);
@@ -373,10 +406,22 @@ fn read_capture(
     Ok(())
 }
 
+struct EagerInference {
+    cancelled: Arc<AtomicBool>,
+    thread: Option<JoinHandle<Result<Transcription>>>,
+}
+
+impl Drop for EagerInference {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
 pub struct Recorder {
     capture: Capture,
     hold: bool,
     idle_epoch: u64,
+    eager: Option<EagerInference>,
 }
 
 impl Recorder {
@@ -386,7 +431,14 @@ impl Recorder {
         on_frame: impl Fn(f64, f64) + Send + Sync + 'static,
         on_end: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self> {
-        let mut session = Session::new(Arc::new(on_frame), Arc::new(on_end));
+        Self::start_session(
+            target,
+            hold,
+            Session::new(Arc::new(on_frame), Arc::new(on_end)),
+        )
+    }
+
+    fn start_session(target: &str, hold: bool, mut session: Session) -> Result<Self> {
         let (idle, idle_epoch) = {
             let mut idle = IDLE.lock().unwrap();
             (idle.capture.take(), idle.epoch)
@@ -396,6 +448,11 @@ impl Recorder {
                 let mut state = capture.state.lock().unwrap();
                 if !state.closed && state.expires.is_some_and(|expiry| expiry > Instant::now()) {
                     session.pcm.extend(state.ring.drain(..));
+                    if let Some(spool) = &mut session.spool {
+                        spool
+                            .write_all(session.pcm.make_contiguous())
+                            .context("Save microphone preroll for recovery")?;
+                    }
                     session.received = true;
                     state.session = Some(session);
                     state.expires = None;
@@ -404,6 +461,7 @@ impl Recorder {
                         capture,
                         hold,
                         idle_epoch,
+                        eager: None,
                     });
                 }
             }
@@ -414,7 +472,119 @@ impl Recorder {
             capture,
             hold,
             idle_epoch,
+            eager: None,
         })
+    }
+
+    pub fn start_eager(
+        target: &str,
+        hold: bool,
+        on_frame: impl Fn(f64, f64) + Send + Sync + 'static,
+        on_end: impl Fn() + Send + Sync + 'static,
+        engine: Arc<Engine>,
+        maximum_seconds: usize,
+    ) -> Result<Self> {
+        Self::start_eager_spooled(
+            target,
+            hold,
+            on_frame,
+            on_end,
+            engine,
+            maximum_seconds,
+            None,
+        )
+    }
+
+    pub fn start_eager_spooled(
+        target: &str,
+        hold: bool,
+        on_frame: impl Fn(f64, f64) + Send + Sync + 'static,
+        on_end: impl Fn() + Send + Sync + 'static,
+        engine: Arc<Engine>,
+        maximum_seconds: usize,
+        spool: Option<&Path>,
+    ) -> Result<Self> {
+        let epoch = engine.recording_epoch();
+        // Keep capture nonblocking. A full queue leaves the PCM in the recorder.
+        let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(64);
+        let mut session = Session::new(Arc::new(on_frame), Arc::new(on_end));
+        session.pieces = Some(PieceQueue {
+            sender,
+            maximum_seconds,
+            ctc: engine.normalizes_ctc_preroll(),
+        });
+        session.spool = spool
+            .map(|path| {
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(path)
+                    .context("Create private recording recovery spool")
+            })
+            .transpose()?;
+        let mut recorder = Self::start_session(target, hold, session)?;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let interrupted = Arc::clone(&cancelled);
+        let worker = thread::spawn(move || {
+            let cancelled = || interrupted.load(Ordering::Acquire);
+            engine.ensure_scoped(epoch, &cancelled)?;
+            let mut transcript = Transcription::default();
+            let mut offset = 0.0;
+            for piece in receiver {
+                anyhow::ensure!(!cancelled(), "Speech inference cancelled");
+                let decoded = engine.transcribe_detailed_scoped(&piece, epoch, &cancelled)?;
+                anyhow::ensure!(!cancelled(), "Speech inference cancelled");
+                transcript.append(decoded, offset);
+                offset += piece.len() as f64 / (RATE * 2) as f64;
+            }
+            anyhow::ensure!(!cancelled(), "Speech inference cancelled");
+            Ok(transcript)
+        });
+        recorder.eager = Some(EagerInference {
+            cancelled,
+            thread: Some(worker),
+        });
+        Ok(recorder)
+    }
+
+    pub fn cancel_eager(&self) {
+        if let Some(eager) = &self.eager {
+            eager.cancelled.store(true, Ordering::Release);
+        }
+    }
+
+    pub fn stop_eager(self, after_stop: impl FnOnce()) -> Result<(Vec<u8>, String, usize)> {
+        self.stop_eager_detailed(after_stop)
+            .map(|(pcm, transcript, recorded)| (pcm, transcript.text, recorded))
+    }
+
+    pub fn stop_eager_detailed(
+        mut self,
+        after_stop: impl FnOnce(),
+    ) -> Result<(Vec<u8>, Transcription, usize)> {
+        let eager = self.eager.take();
+        let recorded = self
+            .capture
+            .state
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .map_or(0, |session| session.recorded);
+        let pcm = self.stop()?;
+        after_stop();
+        let text = match eager {
+            Some(mut worker) => worker
+                .thread
+                .take()
+                .expect("eager thread is present")
+                .join()
+                .map_err(|_| anyhow::anyhow!("Speech inference thread failed"))??,
+            None => Transcription::default(),
+        };
+        Ok((pcm, text, recorded))
     }
 
     pub fn stop(self) -> Result<Vec<u8>> {
@@ -422,6 +592,7 @@ impl Recorder {
             mut capture,
             hold,
             idle_epoch,
+            eager: _,
         } = self;
         let (session, parked, old_error) = {
             let mut state = capture.state.lock().unwrap();
@@ -429,6 +600,12 @@ impl Recorder {
                 .session
                 .take()
                 .context("Microphone is not recording")?;
+            if let Some(error) = &session.spool_failure {
+                bail!("{error}");
+            }
+            if let Some(file) = &session.spool {
+                file.sync_data().context("Save recording recovery spool")?;
+            }
             let parked = hold && !state.closed;
             if parked {
                 state.expires = Some(Instant::now() + HOLD_TIME);

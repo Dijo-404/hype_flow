@@ -1,13 +1,18 @@
 # Copy to ~/.config/hype-flow/config.toml. Every key is optional.
 language = "en"
-# Parakeet Unified supports English only. "auto" is accepted for old configurations.
+model_variant = "parakeet-ctc" # or "low-memory" (TDT) or "unified"; next download
+# These models support English. "auto" is accepted for old configurations.
 input_target = "auto"
 paste = true
+# Opt-in modifier polling on already-readable Linux keyboard devices.
+# Wait 50–1500 ms for release; unreadable keyboards retain the 180 ms wait.
+modifier_release_guard = false
 threads = 4
 dictation_shortcut = "Alt+Space"
+dictation_mode = "toggle" # "hold" requires native niri press/release bindings
 cancel_shortcut = "Mod+Ctrl+Escape"
 # Model files and runtime installed by the app:
-# model = "/absolute/path/to/parakeet-unified-en-int8"
+# model = "/absolute/path/to/parakeet-110m-ctc-en-int8"
 # server = "/absolute/path/to/backend/parakeet/recognizer"
 # gpu is retained for compatibility; this runtime uses the CPU.
 
@@ -15,8 +20,12 @@ cancel_shortcut = "Mod+Ctrl+Escape"
 # Empty by default. Listed spellings also supply preferred capitalization.
 prompt = ""
 vocabulary_boosting = false
-# Decoder bias, not a guaranteed correction. Keep low; valid range 0.5 to 3.0.
+# Unified only. Keep decoder bias low. Valid range 0.5 to 3.0.
 boost_score = 1.5
+# Native hotwords are capped at 100 entries after case variants.
+# Guessed spelling is opt-in; exact capitalization and correction rules still work.
+fuzzy_vocabulary = false
+fuzzy_tolerance = 0.18
 
 # Literal whole-word/phrase substitutions only; no guessed grammar or spelling.
 auto_correct = true
@@ -29,5 +38,56 @@ corrections = ""
 filter_words = true
 blocked_words = "um, uh, erm, umm, uhh"
 # Optional adjacent repeated-word removal. Verbal restarts are never guessed.
+# Legitimate doubles (had, that, very, no, yes, ha, so) remain unchanged.
 remove_repetitions = false
 # General > Copy original recovers recognition before text cleanup.
+
+# Advanced evaluation controls. Defaults stay unchanged until corpus measurements
+# establish a better accuracy/latency trade-off. Beam paths apply only to boosting.
+blank_penalty = 0.0 # range 0–2
+max_active_paths = 4 # range 1–16
+vad_threshold = 0.3 # range 0.1–0.9
+vad_min_silence = 0.45 # seconds, range 0.1–2
+max_piece_seconds = 15 # range 5–60; bounded quiet-window cuts also apply without VAD
+cut_silence = true
+noise_suppression = false
+
+# Closed pieces decode while recording. Audio leaves the capture buffer once
+# queued; cancellation stops inference and discards the pending pieces.
+# Input shorter than 300 ms is rejected before final inference.
+keep_mic_ready = false # holds the microphone open for 30 seconds after stopping
+# 0 = never; 1, 2, 5, 10, 15, 30, 60 = idle minutes;
+# 4294967295 = after each dictation. Reload overlaps the next recording.
+unload_minutes = 10
+
+# Experimental quiet-input gain after denoising and before VAD; at most +20 dB.
+# Zero/very-low-level noise is unchanged. Off until broader corpus validation.
+normalize_gain = false
+
+# Optional private audio storage under $XDG_STATE_HOME/hype-flow (default: off).
+# Recovery stores failed/interrupted recordings; history stores successful ones.
+# Each collection keeps the latest 20 WAVs, mode 0600 in mode-0700 directories.
+# Disabling these settings stops future persistence; Delete saved recordings
+# removes existing saved audio. Retry copies text instead of targeting another app.
+recover_recordings = false
+history_enabled = false
+
+# Deterministic text features. Protected URLs, addresses, quotes and code bypass them.
+spoken_commands = false
+remove_restarts = false
+format_numbers = false
+capitalize_after_filler = false
+
+# Confidence and anomaly gates are experimental until calibrated on your speech.
+# Missing confidence prevents fuzzy correction when confidence_filtering is on.
+confidence_filtering = false
+confidence_threshold = -1.0
+hallucination_filtering = false
+anomaly_threshold = 3.0
+# Only one retry, and only when an energy gate detects sustained audible input.
+soft_speech_retry = false
+
+# Advanced CPU runtime experiments. Unified uses 128 features and 110M models use 80.
+# feature_dim = 80
+provider = "cpu"
+# provider = "cpu:/absolute/model/directory/session.cfg"

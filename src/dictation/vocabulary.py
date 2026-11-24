@@ -30,7 +30,7 @@ def hotwords(value):
         if any(word.startswith(":") for word in term.split()):
             raise ValueError("Vocabulary words cannot begin with a colon")
         for variant in (term, term.lower(), term[:1].upper() + term[1:]):
-            if variant not in result:
+            if len(result) < 100 and variant not in result:
                 result.append(variant)
     return "\n".join(result)
 

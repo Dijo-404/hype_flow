@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Verify first-use model activation through the production application's action."""
-import json
+import argparse
 import os
 from pathlib import Path
 import subprocess
@@ -13,7 +13,7 @@ from ui_driver import Gio, wait
 REPO = Path(__file__).resolve().parents[1]
 
 
-def inside(root):
+def inside(root, low_memory_archive, ctc_archive):
     cached = Path.home() / ".local/share/hype-flow/downloads"
     data = root / "data/hype-flow"
     downloads = data / "downloads"
@@ -21,10 +21,20 @@ def inside(root):
     for source in cached.iterdir():
         if source.is_file() and not source.name.endswith(".part"):
             (downloads / source.name).symlink_to(source)
+    name = "parakeet-unified-en-int8"
+    archive = low_memory_archive or ctc_archive
+    if archive:
+        name = "parakeet-110m-ctc-en-int8" if ctc_archive else "parakeet-110m-en-int8"
+        if not (downloads / f"{name}.tar.bz2").exists():
+            (downloads / f"{name}.tar.bz2").symlink_to(archive)
     configuration = root / "config/hype-flow"
     configuration.mkdir(parents=True)
     config = configuration / "config.toml"
-    initial = 'model = "/test/previous-model"\nserver = "/test/previous-worker"\nlanguage = "auto"\ngpu = true\npaste = false\nprompt = "Saved names"\nsounds = false\npause_media = false\n'
+    initial = 'language = "auto"\ngpu = true\npaste = false\nprompt = "Saved names"\nsounds = false\npause_media = false\n'
+    if not ctc_archive:
+        initial += 'model = "/test/previous-model"\nserver = "/test/previous-worker"\n'
+    if low_memory_archive:
+        initial += 'model_variant = "low-memory"\n'
     config.write_text(initial)
     tools = root / "no-compiler"
     tools.mkdir()
@@ -45,12 +55,17 @@ def inside(root):
         group.activate_action("download", None)
         wait(lambda: (value := state()) and value[:2] == ("idle", "Ready"), "installed model ready", timeout=180)
         values = tomllib.loads(config.read_text())
-        assert values["model"] == str(data / "models/parakeet-unified-en-int8")
+        model = data / "models" / name
+        assert values["model"] == str(model)
+        assert values["feature_dim"] == (80 if archive else 128)
         assert values["server"] == str(data / "backend/parakeet/recognizer")
         assert values["language"] == "en" and not values["gpu"]
         assert not values["paste"] and values["prompt"] == "Saved names"
         assert (configuration / "config.toml.previous").read_text() == initial
-        assert (data / "models/parakeet-unified-en-int8/bpe.vocab").is_file()
+        assert (model / "bpe.vocab").is_file() == (not archive)
+        if ctc_archive:
+            assert values["model_variant"] == "parakeet-ctc"
+            assert (model / "model.int8.onnx").is_file()
         print("Production setup action activated the verified model and preserved preferences/backup", flush=True)
         (root / "complete").touch()
     finally:
@@ -59,9 +74,19 @@ def inside(root):
 
 
 if __name__ == "__main__":
-    if "--inside" in sys.argv:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
+    archives = parser.add_mutually_exclusive_group()
+    archives.add_argument("--low-memory-archive", type=Path)
+    archives.add_argument("--ctc-archive", type=Path)
+    args = parser.parse_args()
+    if args.low_memory_archive:
+        args.low_memory_archive = args.low_memory_archive.resolve(strict=True)
+    if args.ctc_archive:
+        args.ctc_archive = args.ctc_archive.resolve(strict=True)
+    if args.inside:
         try:
-            inside(Path(os.environ["HYPE_FLOW_ACTIVATION_ROOT"]))
+            inside(Path(os.environ["HYPE_FLOW_ACTIVATION_ROOT"]), args.low_memory_archive, args.ctc_archive)
         finally:
             subprocess.run(["niri", "msg", "action", "quit", "--skip-confirmation"], timeout=5)
     else:
@@ -78,5 +103,5 @@ if __name__ == "__main__":
                            "WAYLAND_DISPLAY": str(display), "GTK_A11Y": "none", "ACTIVATION_PYTHON": sys.executable,
                            "ACTIVATION_SCRIPT": str(Path(__file__).resolve()), "ACTIVATION_LOG": str(log)}
             subprocess.run(["dbus-run-session", "--", "niri", "-c", str(REPO / "tests/fixtures/niri.kdl"), "--", "sh", "-c",
-                            'exec "$ACTIVATION_PYTHON" "$ACTIVATION_SCRIPT" --inside > "$ACTIVATION_LOG" 2>&1'], env=environment, check=True, timeout=240)
+                            'exec "$ACTIVATION_PYTHON" "$ACTIVATION_SCRIPT" --inside "$@" > "$ACTIVATION_LOG" 2>&1', "sh", *sys.argv[1:]], env=environment, check=True, timeout=240)
             assert (root / "complete").exists(), log.read_text()

@@ -1,0 +1,184 @@
+{
+  "passed": true,
+  "gate": "words",
+  "exact_format_passed": false,
+  "exact_format_failures": [
+    "jfk.wav: interior changed transcript (case/punctuation only)",
+    "long.wav: trailing changed transcript (case/punctuation only)",
+    "long.wav: click changed transcript (case/punctuation only)",
+    "long.wav: interior changed transcript (case/punctuation only)"
+  ],
+  "clips": 3,
+  "failures": [],
+  "observations": [
+    {
+      "audio": "jfk.wav",
+      "variant": "trailing",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "jfk.wav",
+      "variant": "click",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "jfk.wav",
+      "variant": "leading",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "jfk.wav",
+      "variant": "interior",
+      "exact_match": false,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "long.wav",
+      "variant": "trailing",
+      "exact_match": false,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "long.wav",
+      "variant": "click",
+      "exact_match": false,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "long.wav",
+      "variant": "leading",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "long.wav",
+      "variant": "interior",
+      "exact_match": false,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "silence.wav",
+      "variant": "trailing",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "silence.wav",
+      "variant": "click",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "silence.wav",
+      "variant": "leading",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    },
+    {
+      "audio": "silence.wav",
+      "variant": "interior",
+      "exact_match": true,
+      "normalized_match": true,
+      "lcs_similarity": 1.0
+    }
+  ],
+  "provenance": {
+    "decoder.int8.onnx": {
+      "bytes": 7257753,
+      "sha256": "a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6"
+    },
+    "encoder.int8.onnx": {
+      "bytes": 654040552,
+      "sha256": "6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0"
+    },
+    "joiner.int8.onnx": {
+      "bytes": 1735860,
+      "sha256": "869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a"
+    },
+    "libonnxruntime.so": {
+      "bytes": 27026609,
+      "sha256": "4b3607aebd1784b26b6f9b20e4bd974c7ab8287043e4d095cb7d2cb40b5e566e"
+    },
+    "libsherpa-onnx-c-api.so": {
+      "bytes": 3626056,
+      "sha256": "c067b18cd746e49eb5016ee428196d21e1df14c14a3c54f128c1ac95f6aaed50"
+    },
+    "silero_vad.onnx": {
+      "bytes": 643854,
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
+    },
+    "tokens.txt": {
+      "bytes": 8952,
+      "sha256": "dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff"
+    },
+    "worker": {
+      "bytes": 547544,
+      "sha256": "9b5665daa09b8664bafe399d6091099ae6e9b50578c50b5dede783c7a80b76e7"
+    }
+  },
+  "config": {
+    "anomaly_threshold": 3.0,
+    "auto_correct": true,
+    "blank_penalty": 0.0,
+    "blocked_words": "um, uh, erm, umm, uhh",
+    "boost_score": 1.5,
+    "cancel_shortcut": "Mod+Ctrl+Escape",
+    "capitalize_after_filler": false,
+    "confidence_filtering": false,
+    "confidence_threshold": -1.0,
+    "corrections": "",
+    "cut_silence": true,
+    "dictation_mode": "toggle",
+    "dictation_shortcut": "Mod+Ctrl+Space",
+    "feature_dim": 128,
+    "filter_words": true,
+    "format_numbers": false,
+    "fuzzy_tolerance": 0.18,
+    "fuzzy_vocabulary": false,
+    "gpu": false,
+    "hallucination_filtering": false,
+    "history_enabled": false,
+    "input_target": "auto",
+    "keep_mic_ready": false,
+    "language": "en",
+    "max_active_paths": 4,
+    "max_piece_seconds": 15,
+    "model": "/home/dj/.local/share/hype-flow/models/parakeet-unified-en-int8",
+    "model_variant": "unified",
+    "modifier_release_guard": false,
+    "noise_suppression": false,
+    "normalize_gain": false,
+    "paste": true,
+    "pause_media": true,
+    "press_enter": false,
+    "prompt": "",
+    "provider": "cpu",
+    "recover_recordings": false,
+    "remove_repetitions": false,
+    "remove_restarts": false,
+    "server": "/home/dj/projects/hype_flow/.migration/completion-worker/recognizer",
+    "soft_speech_retry": false,
+    "sounds": true,
+    "spoken_commands": false,
+    "threads": 4,
+    "trailing_space": false,
+    "unload_minutes": 10,
+    "vad_min_silence": 0.44999998807907104,
+    "vad_threshold": 0.30000001192092896,
+    "vocabulary_boosting": false
+  }
+}

@@ -10,9 +10,10 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::{cleanup, vocabulary};
+use crate::{cleanup, setup, vocabulary};
 
-pub const UNLOAD_CHOICES: [u32; 6] = [0, 5, 10, 15, 30, 60];
+pub const UNLOAD_AFTER_EACH: u32 = u32::MAX;
+pub const UNLOAD_CHOICES: [u32; 9] = [0, 1, 2, 5, 10, 15, 30, 60, UNLOAD_AFTER_EACH];
 
 pub fn data_dir() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share")
@@ -59,12 +60,21 @@ pub fn runtime_dir() -> Result<PathBuf> {
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub model: String,
+    pub model_variant: String,
     pub server: String,
     pub language: String,
     pub prompt: String,
     pub threads: u32,
+    pub feature_dim: i32,
+    pub provider: String,
+    pub blank_penalty: f32,
+    pub max_active_paths: i32,
+    pub vad_threshold: f32,
+    pub vad_min_silence: f32,
+    pub max_piece_seconds: u32,
     pub gpu: bool,
     pub paste: bool,
+    pub modifier_release_guard: bool,
     pub input_target: String,
     pub vocabulary_boosting: bool,
     pub boost_score: f64,
@@ -83,20 +93,36 @@ pub struct Config {
     pub unload_minutes: u32,
     pub cut_silence: bool,
     pub noise_suppression: bool,
+    pub normalize_gain: bool,
+    pub recover_recordings: bool,
+    pub history_enabled: bool,
+    pub spoken_commands: bool,
+    pub remove_restarts: bool,
+    pub format_numbers: bool,
+    pub capitalize_after_filler: bool,
+    pub confidence_filtering: bool,
+    pub confidence_threshold: f64,
+    pub hallucination_filtering: bool,
+    pub anomaly_threshold: f64,
+    pub soft_speech_retry: bool,
     pub dictation_shortcut: String,
+    pub dictation_mode: String,
     pub cancel_shortcut: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
         let root = data_dir();
+        let model = setup::model_spec(setup::DEFAULT_MODEL_VARIANT).expect("default speech model");
         // SAFETY: sysconf takes a constant and has no pointer arguments.
         let cpus = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
         Self {
             model: root
-                .join("models/parakeet-unified-en-int8")
+                .join("models")
+                .join(model.name)
                 .to_string_lossy()
                 .into_owned(),
+            model_variant: setup::DEFAULT_MODEL_VARIANT.into(),
             server: root
                 .join("backend/parakeet/recognizer")
                 .to_string_lossy()
@@ -104,8 +130,16 @@ impl Default for Config {
             language: "en".into(),
             prompt: String::new(),
             threads: if cpus > 0 { cpus.min(4) as u32 } else { 4 },
+            feature_dim: model.feature_dim as i32,
+            provider: "cpu".into(),
+            blank_penalty: 0.0,
+            max_active_paths: 4,
+            vad_threshold: 0.3,
+            vad_min_silence: 0.45,
+            max_piece_seconds: 15,
             gpu: false,
             paste: true,
+            modifier_release_guard: false,
             input_target: "auto".into(),
             vocabulary_boosting: false,
             boost_score: 1.5,
@@ -114,7 +148,7 @@ impl Default for Config {
             filter_words: true,
             blocked_words: cleanup::DEFAULT_FILTERS.into(),
             remove_repetitions: false,
-            fuzzy_vocabulary: true,
+            fuzzy_vocabulary: false,
             fuzzy_tolerance: 0.18,
             sounds: true,
             pause_media: true,
@@ -124,13 +158,66 @@ impl Default for Config {
             unload_minutes: 10,
             cut_silence: true,
             noise_suppression: false,
+            normalize_gain: false,
+            recover_recordings: false,
+            history_enabled: false,
+            spoken_commands: false,
+            remove_restarts: false,
+            format_numbers: false,
+            capitalize_after_filler: false,
+            confidence_filtering: false,
+            confidence_threshold: -1.0,
+            hallucination_filtering: false,
+            anomaly_threshold: 3.0,
+            soft_speech_retry: false,
             dictation_shortcut: "Mod+Ctrl+Space".into(),
+            dictation_mode: "toggle".into(),
             cancel_shortcut: "Mod+Ctrl+Escape".into(),
         }
     }
 }
 
 impl Config {
+    pub fn from_table(mut supplied: toml::Table) -> Result<Self> {
+        let variant = match supplied.get("model").and_then(toml::Value::as_str) {
+            Some(model) => setup::variant_for_path(Path::new(model)),
+            None => supplied
+                .get("model_variant")
+                .and_then(toml::Value::as_str)
+                .unwrap_or_else(|| {
+                    if supplied
+                        .get("feature_dim")
+                        .and_then(toml::Value::as_integer)
+                        == Some(128)
+                        || supplied
+                            .get("vocabulary_boosting")
+                            .and_then(toml::Value::as_bool)
+                            == Some(true)
+                    {
+                        "unified"
+                    } else {
+                        setup::DEFAULT_MODEL_VARIANT
+                    }
+                }),
+        };
+        let model = setup::model_spec(variant)?;
+        let variant = toml::Value::String(variant.into());
+        supplied.entry("model_variant").or_insert(variant);
+        supplied.entry("model").or_insert_with(|| {
+            toml::Value::String(
+                data_dir()
+                    .join("models")
+                    .join(model.name)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        });
+        supplied
+            .entry("feature_dim")
+            .or_insert(toml::Value::Integer(model.feature_dim.into()));
+        Ok(supplied.try_into()?)
+    }
+
     pub fn load() -> Result<Self> {
         let path = config_dir().join("config.toml");
         let mut values = match read_existing(&path)? {
@@ -162,17 +249,35 @@ impl Config {
                         supplied.remove(key);
                     }
                 }
-                supplied.try_into()?
+                Self::from_table(supplied)?
             }
             None => Self::default(),
         };
         values.validate()?;
         values.model = resolve_path(&values.model)?;
         values.server = resolve_path(&values.server)?;
+        if let Some(path) = values.provider.strip_prefix("cpu:") {
+            values.provider = format!("cpu:{}", resolve_path(path)?);
+        }
         Ok(values)
     }
 
     pub fn validate(&self) -> Result<()> {
+        setup::model_spec(&self.model_variant)?;
+        ensure!(
+            matches!(self.dictation_mode.as_str(), "toggle" | "hold"),
+            "dictation_mode must be toggle or hold"
+        );
+        if setup::variant_for_path(Path::new(&self.model)) != "unified" {
+            ensure!(
+                self.feature_dim == 80,
+                "Parakeet 110M requires feature_dim = 80"
+            );
+            ensure!(
+                !self.vocabulary_boosting,
+                "Native vocabulary boosting is unavailable for Parakeet 110M. Text corrections remain available."
+            );
+        }
         ensure!(
             (1..=64).contains(&self.threads),
             "threads must be between 1 and 64"
@@ -187,7 +292,55 @@ impl Config {
         );
         ensure!(
             UNLOAD_CHOICES.contains(&self.unload_minutes),
-            "Unload after must be one of 0, 5, 10, 15, 30, 60 minutes"
+            "Unload after must be 0, 1, 2, 5, 10, 15, 30, 60 minutes, or after each dictation"
+        );
+        ensure!(
+            (0.0..=2.0).contains(&self.blank_penalty),
+            "blank_penalty must be between 0 and 2"
+        );
+        ensure!(
+            (1..=16).contains(&self.max_active_paths),
+            "max_active_paths must be between 1 and 16"
+        );
+        ensure!(
+            (0.1..=0.9).contains(&self.vad_threshold),
+            "vad_threshold must be between 0.1 and 0.9"
+        );
+        ensure!(
+            (0.1..=2.0).contains(&self.vad_min_silence),
+            "vad_min_silence must be between 0.1 and 2 seconds"
+        );
+        ensure!(
+            (5..=60).contains(&self.max_piece_seconds),
+            "max_piece_seconds must be between 5 and 60"
+        );
+        ensure!(
+            matches!(self.feature_dim, 80 | 128),
+            "feature_dim must be 80 or 128"
+        );
+        if let Some(path) = self.provider.strip_prefix("cpu:") {
+            let model = fs::canonicalize(resolve_path(&self.model)?)
+                .context("Model directory for provider config")?;
+            let supplied =
+                fs::canonicalize(resolve_path(path)?).context("Provider session config file")?;
+            ensure!(
+                supplied.is_file() && supplied.starts_with(model),
+                "Provider session config must be inside model directory"
+            );
+        } else {
+            ensure!(
+                self.provider == "cpu",
+                "Only CPU provider or a model-local CPU session config is supported"
+            );
+        }
+        ensure!(
+            self.confidence_threshold.is_finite()
+                && (-20.0..=0.0).contains(&self.confidence_threshold),
+            "confidence_threshold must be between -20 and 0"
+        );
+        ensure!(
+            self.anomaly_threshold.is_finite() && (1.0..=20.0).contains(&self.anomaly_threshold),
+            "anomaly_threshold must be between 1 and 20"
         );
         vocabulary::hotwords(&self.prompt)?;
         vocabulary::terms(&self.blocked_words)?;

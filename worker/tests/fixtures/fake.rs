@@ -26,22 +26,32 @@ unsafe extern "C" fn SherpaOnnxCreateOfflineRecognizer(
 ) -> *const SherpaOnnxOfflineRecognizer {
     let config = &*config;
     let model = &config.model_config;
+    let ctc = mode("ctc-pause");
     assert_eq!(config.feat_config.sample_rate, 16000);
-    assert_eq!(config.feat_config.feature_dim, 128);
+    assert_eq!(
+        config.feat_config.feature_dim,
+        if ctc || mode("feature-80") { 80 } else { 128 }
+    );
     assert_eq!(model.num_threads, 2);
     assert_eq!(CStr::from_ptr(model.provider), c"cpu");
-    assert_eq!(
-        CStr::from_ptr(model.transducer.encoder),
-        c"model/encoder.int8.onnx"
-    );
-    assert_eq!(
-        CStr::from_ptr(model.transducer.decoder),
-        c"model/decoder.int8.onnx"
-    );
-    assert_eq!(
-        CStr::from_ptr(model.transducer.joiner),
-        c"model/joiner.int8.onnx"
-    );
+    if ctc {
+        assert_eq!(CStr::from_ptr(model.nemo_ctc.model), c"model/model.int8.onnx");
+        assert!(model.transducer.encoder.is_null());
+    } else {
+        assert_eq!(CStr::from_ptr(model.model_type), c"nemo_transducer");
+        assert_eq!(
+            CStr::from_ptr(model.transducer.encoder),
+            c"model/encoder.int8.onnx"
+        );
+        assert_eq!(
+            CStr::from_ptr(model.transducer.decoder),
+            c"model/decoder.int8.onnx"
+        );
+        assert_eq!(
+            CStr::from_ptr(model.transducer.joiner),
+            c"model/joiner.int8.onnx"
+        );
+    }
     assert_eq!(CStr::from_ptr(model.tokens), c"model/tokens.txt");
     if config.hotwords_file.is_null() {
         assert_eq!(CStr::from_ptr(config.decoding_method), c"greedy_search");
@@ -102,7 +112,19 @@ unsafe extern "C" fn SherpaOnnxGetOfflineStreamResult(
     p: *const SherpaOnnxOfflineStream,
 ) -> *const SherpaOnnxOfflineRecognizerResult {
     let samples = &*p.cast::<Vec<f32>>();
-    let json = if mode("oversize-result") {
+    static RESULTS: AtomicUsize = AtomicUsize::new(0);
+    let json = if mode("ctc-pause") {
+        // Sample 12,000 is between the two padded VAD ranges.
+        assert_eq!(samples.len(), 19_200);
+        assert_eq!(samples[12_000 - 800], 12_000.0 / 65536.0);
+        "{\"text\":\"paused\",\"timestamps\":[0.7]}".to_owned()
+    } else if mode("empty-first") {
+        if RESULTS.fetch_add(1, Relaxed) == 0 {
+            "{\"text\":\"\"}".to_owned()
+        } else {
+            "{\"text\":\"recovered\"}".to_owned()
+        }
+    } else if mode("oversize-result") {
         "x".repeat(1_048_577)
     } else if samples.len() > 3 {
         format!(
@@ -147,8 +169,8 @@ unsafe extern "C" fn SherpaOnnxCreateVoiceActivityDetector(
     assert_eq!(silero.min_silence_duration, 0.45);
     assert_eq!(silero.min_speech_duration, 0.06);
     assert_eq!(silero.window_size, 512);
-    assert_eq!(silero.max_speech_duration, 30.0);
-    assert_eq!(buffer_seconds, 300.0);
+    assert_eq!(silero.max_speech_duration, 60.0);
+    assert_eq!(buffer_seconds, 65.0);
     handle()
 }
 
@@ -166,7 +188,10 @@ unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorAcceptWaveform(
     n: i32,
 ) {
     let offset = WINDOWS.fetch_add(1, Relaxed);
-    if mode("fallback") {
+    if mode("energy-retry") {
+        assert_eq!(n, 512.min(1600 - offset * 512) as i32);
+        assert!(*samples > 0.02);
+    } else if mode("fallback") {
         assert_eq!(n, 3);
         assert_eq!(*samples, -1.0);
     } else {
@@ -191,7 +216,10 @@ unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorPop(_: *const SherpaOnnxVoic
 unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorFront(
     _: *const SherpaOnnxVoiceActivityDetector,
 ) -> *const SherpaOnnxSpeechSegment {
-    let (start, n) = if SEGMENTS.load(Relaxed) == 2 {
+    let first = SEGMENTS.load(Relaxed) == 2;
+    let (start, n) = if mode("ctc-pause") {
+        if first { (8_000, 500) } else { (19_800, 100) }
+    } else if first {
         (10_000, 500)
     } else {
         (13_000, 700)
@@ -221,7 +249,9 @@ unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorReset(
 unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorFlush(
     _: *const SherpaOnnxVoiceActivityDetector,
 ) {
-    if mode("fallback") {
+    if mode("energy-retry") {
+        assert_eq!(WINDOWS.load(Relaxed), 4);
+    } else if mode("fallback") {
         assert_eq!(WINDOWS.load(Relaxed), 1);
     } else {
         assert_eq!(WINDOWS.load(Relaxed), 40);

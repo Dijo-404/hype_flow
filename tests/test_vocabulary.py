@@ -17,6 +17,13 @@ class VocabularyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             terms("bad\x00word")
 
+    def test_case_variants_never_exceed_native_hotword_cap(self):
+        result = hotwords(",".join("word" + str(index) for index in range(100)))
+        self.assertEqual(len(result.splitlines()), 100)
+        self.assertEqual(len(set(result.splitlines())), 100)
+        with self.assertRaises(ValueError):
+            hotwords(",".join("word" + str(index) for index in range(100)) + ",bad :99")
+
     def test_sentencepiece_export_keeps_original_scores_and_checks_tokens(self):
         # A minimal ModelProto with one SentencePiece message: piece='a', score=-1.0.
         piece = b"\x0a\x01a\x15" + struct.pack("<f", -1.0)

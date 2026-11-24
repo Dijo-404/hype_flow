@@ -206,9 +206,11 @@ fn check_config_paths(root: &std::path::Path) {
     assert_eq!(
         defaults.model,
         directory
-            .join("models/parakeet-unified-en-int8")
+            .join("models/parakeet-110m-ctc-en-int8")
             .to_string_lossy()
     );
+    assert_eq!(defaults.model_variant, "parakeet-ctc");
+    assert_eq!(defaults.feature_dim, 80);
     assert_eq!(
         defaults.server,
         directory
@@ -227,6 +229,19 @@ fn check_config_paths(root: &std::path::Path) {
 
     let path = directory.join("config.toml");
     let backup = directory.join("config.toml.previous");
+    fs::write(
+        &path,
+        "model = \"/test/parakeet-unified-en-int8\"\nmodel_variant = \"parakeet-ctc\"\n",
+    )
+    .unwrap();
+    let switching = Config::load().unwrap();
+    assert_eq!(switching.model, "/test/parakeet-unified-en-int8");
+    assert_eq!(switching.model_variant, "parakeet-ctc");
+    assert_eq!(switching.feature_dim, 128);
+    fs::write(&path, "model_variant = \"unified\"\n").unwrap();
+    let unified = Config::load().unwrap();
+    assert!(unified.model.ends_with("/models/parakeet-unified-en-int8"));
+    assert_eq!(unified.feature_dim, 128);
     for (input, field) in [
         ("threads = true\n", "threads"),
         ("unknown = 1\n", "Unknown settings"),
@@ -237,6 +252,12 @@ fn check_config_paths(root: &std::path::Path) {
         ("unload_minutes = 7", "Unload"),
         ("unload_minutes = false", "unload_minutes"),
         ("corrections = \"bad\"", "Correction line"),
+        ("model_variant = \"remote\"", "model_variant"),
+        ("dictation_mode = \"always\"", "dictation_mode"),
+        ("confidence_threshold = nan", "confidence_threshold"),
+        ("anomaly_threshold = inf", "anomaly_threshold"),
+        ("feature_dim = 64", "feature_dim"),
+        ("provider = \"cuda\"", "CPU provider"),
     ] {
         fs::write(&path, input).unwrap();
         assert!(

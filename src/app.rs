@@ -5,7 +5,7 @@ use crate::{
     config::{self, Config},
     controller::Session,
     feedback::{self, MediaPause},
-    hook, output, setup, shortcuts,
+    hook, output, recovery, setup, shortcuts,
     ui::{Home, Overlay},
 };
 use anyhow::{Context, Result};
@@ -26,16 +26,38 @@ use std::{
 };
 
 type Transcript = (String, String, Option<String>, bool);
+const MIN_RECORDING_BYTES: usize = crate::backend::RATE * 2 * 3 / 10;
+
+fn validate_recording_length(bytes: usize) -> Result<()> {
+    anyhow::ensure!(
+        bytes >= MIN_RECORDING_BYTES,
+        "Recording too short (minimum 300 ms)"
+    );
+    Ok(())
+}
+
 enum Event {
     Warmed(u64, Result<()>),
-    Started(u64, Result<(Recorder, Option<serde_json::Value>)>),
+    Started(
+        u64,
+        Result<(Recorder, Option<serde_json::Value>, Option<PathBuf>)>,
+    ),
     Frame(u64, f64, f64),
     CaptureEnded(u64),
+    CaptureStopped(u64),
     Transcribed(u64, Result<Transcript>),
     Delivered(u64, Result<String>),
-    Downloaded(Result<(String, String)>),
+    Downloaded(String, Result<(String, String)>),
+    Recovered(Result<usize>),
     Notice(String),
     Quit,
+}
+
+fn discard_pending_capture(event: Event) {
+    if let Event::Started(_, Ok((recorder, _, spool))) = event {
+        drop(recorder);
+        recovery::discard(spool.as_deref());
+    }
 }
 
 struct AppState {
@@ -48,6 +70,7 @@ struct AppState {
     live: Arc<AtomicU64>,
     engine: Arc<Engine>,
     recorder: Option<Recorder>,
+    recording_spool: Option<PathBuf>,
     workers: Vec<thread::JoinHandle<()>>,
     stop_pending: bool,
     target: Option<serde_json::Value>,
@@ -63,6 +86,7 @@ struct AppState {
     unloading: Option<glib::SourceId>,
     settling: Option<glib::SourceId>,
     downloading: bool,
+    recovering: bool,
     signals: Option<signal_hook::iterator::Handle>,
 }
 
@@ -78,6 +102,27 @@ fn write_private(path: &std::path::Path, text: &str) -> Result<()> {
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
     file.write_all(text.as_bytes())?;
     Ok(())
+}
+
+fn finish_recognition(
+    transcript: crate::backend::Transcription,
+    values: &Config,
+    cancelled: impl Fn() -> bool,
+) -> Result<(String, String, Option<String>)> {
+    anyhow::ensure!(!cancelled(), "Speech inference cancelled");
+    if transcript.text.is_empty() {
+        return Ok((String::new(), String::new(), None));
+    }
+    if values.hallucination_filtering && transcript.anomaly_score >= values.anomaly_threshold {
+        return Ok((
+            transcript.text,
+            String::new(),
+            Some("Anomalous recognition filtered; original saved".into()),
+        ));
+    }
+    let cleaned = cleanup::process_with_confidence(&transcript.text, values, &transcript.words)?;
+    let (text, note) = hook::run_hook_until(&cleaned, cancelled);
+    Ok((transcript.text, text, note))
 }
 
 impl AppState {
@@ -136,7 +181,11 @@ impl AppState {
         {
             let weak = self.weak.clone();
             self.unloading = Some(glib::timeout_add_local_once(
-                Duration::from_secs(u64::from(self.values.unload_minutes) * 60),
+                if self.values.unload_minutes == config::UNLOAD_AFTER_EACH {
+                    Duration::ZERO
+                } else {
+                    Duration::from_secs(u64::from(self.values.unload_minutes) * 60)
+                },
                 move || {
                     if let Some(app) = weak.upgrade() {
                         let mut app = app.borrow_mut();
@@ -213,6 +262,37 @@ impl AppState {
                     let _ = tx.send_blocking(Event::Notice(message));
                 });
             }
+            "retry-last" => self.retry("failed"),
+            "retry-history" => self.retry("history"),
+            "clear-recordings" => {
+                if !self.recovering
+                    && !self.session.busy
+                    && !matches!(self.session.phase, "starting" | "recording")
+                {
+                    let message = match recovery::clear() {
+                        Ok(()) => "Saved recordings deleted".into(),
+                        Err(error) => format!("Could not delete recordings: {error:#}"),
+                    };
+                    self.publish("idle", &message, false, 0.0, 0.0);
+                }
+            }
+            "press" => {
+                if self.downloading || !setup::assets_ready(&self.values) {
+                    self.show();
+                    return;
+                }
+                if !matches!(self.session.phase, "starting" | "recording")
+                    && !self.session.busy
+                    && self.session.ready
+                {
+                    self.start();
+                }
+            }
+            "release" => {
+                if matches!(self.session.phase, "starting" | "recording") {
+                    self.stop();
+                }
+            }
             "download" => self.download(),
             "shortcuts" => {
                 let tx = self.tx.clone();
@@ -246,6 +326,12 @@ impl AppState {
     }
 
     fn start(&mut self) {
+        if self.recovering {
+            if let Some(home) = &self.home {
+                home.feedback("Finish recovering interrupted recordings before starting dictation");
+            }
+            return;
+        }
         let Some(generation) = self.session.start() else {
             return;
         };
@@ -266,24 +352,43 @@ impl AppState {
         let tx = self.tx.clone();
         let target = self.values.input_target.clone();
         let hold = self.values.keep_mic_ready;
+        let engine = self.engine.clone();
+        let maximum_seconds = self.values.max_piece_seconds as usize;
+        let recover_audio = self.values.recover_recordings || self.values.history_enabled;
         self.workers.push(thread::spawn(move || {
             let frames = tx.clone();
             let ends = tx.clone();
-            let result = Recorder::start(
-                &target,
-                hold,
-                move |level, duration| {
-                    let _ = frames.try_send(Event::Frame(generation, level, duration));
-                },
-                move || {
-                    let _ = ends.send_blocking(Event::CaptureEnded(generation));
-                },
-            )
-            .map(|recorder| {
-                let target = output::focused_window();
-                (recorder, target)
+            let spool = if recover_audio {
+                recovery::begin().map(Some)
+            } else {
+                Ok(None)
+            };
+            let result = spool.and_then(|spool| {
+                let result = Recorder::start_eager_spooled(
+                    &target,
+                    hold,
+                    move |level, duration| {
+                        let _ = frames.try_send(Event::Frame(generation, level, duration));
+                    },
+                    move || {
+                        let _ = ends.send_blocking(Event::CaptureEnded(generation));
+                    },
+                    engine,
+                    maximum_seconds,
+                    spool.as_deref(),
+                )
+                .map(|recorder| {
+                    let target = output::focused_window();
+                    (recorder, target, spool.clone())
+                });
+                if result.is_err() {
+                    recovery::discard(spool.as_deref());
+                }
+                result
             });
-            let _ = tx.send_blocking(Event::Started(generation, result));
+            if let Err(error) = tx.send_blocking(Event::Started(generation, result)) {
+                discard_pending_capture(error.into_inner());
+            }
         }));
     }
 
@@ -295,38 +400,56 @@ impl AppState {
         let Some(generation) = self.session.stop() else {
             return;
         };
-        self.media.resume();
-        if self.values.sounds {
-            let _ = feedback::play_cue("stop", &self.runtime);
-        }
         self.publish("transcribing", "Transcribing", true, 0.0, 0.0);
         let engine = self.engine.clone();
         let values = self.values.clone();
         let live = self.live.clone();
         let tx = self.tx.clone();
+        let runtime = self.runtime.clone();
+        let recording_epoch = engine.recording_epoch();
+        let spool = self.recording_spool.take();
         self.workers.push(thread::spawn(move || {
+            let cancelled = || generation != live.load(Ordering::Acquire);
+            let mut recording_too_short = false;
             let result = (|| {
-                let pcm = recorder.stop()?;
+                let (pcm, mut committed, recorded) = recorder.stop_eager_detailed(|| {
+                    if generation != live.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let _ = tx.send_blocking(Event::CaptureStopped(generation));
+                    if values.sounds && generation == live.load(Ordering::Acquire) {
+                        let _ = feedback::play_cue("stop", &runtime);
+                    }
+                })?;
+                recording_too_short = recorded < MIN_RECORDING_BYTES;
+                validate_recording_length(recorded)?;
                 anyhow::ensure!(
                     generation == live.load(Ordering::Acquire),
                     "Speech inference cancelled"
                 );
-                engine.ensure()?;
-                let raw = engine.transcribe(&pcm)?;
-                anyhow::ensure!(
-                    generation == live.load(Ordering::Acquire),
-                    "Speech inference cancelled"
-                );
-                let silent = raw.is_empty() && !pcm.iter().any(|byte| *byte != 0);
-                let (text, note) = if raw.is_empty() {
-                    (String::new(), None)
-                } else {
-                    hook::run_hook_until(&cleanup::process(&raw, &values)?, || {
-                        generation != live.load(Ordering::Acquire)
-                    })
-                };
+                engine.ensure_scoped(recording_epoch, &cancelled)?;
+                let tail = engine.transcribe_detailed_scoped(&pcm, recording_epoch, &cancelled)?;
+                let tail_offset = committed.audio_seconds;
+                committed.append(tail, tail_offset);
+                let silent = committed.text.is_empty() && !pcm.iter().any(|byte| *byte != 0);
+                let (raw, text, note) = finish_recognition(committed, &values, cancelled)?;
                 Ok((raw, text, note, silent))
             })();
+            if let Some(path) = spool.as_deref() {
+                if cancelled() || recording_too_short {
+                    recovery::discard(Some(path));
+                } else if result.is_err() && values.recover_recordings {
+                    if let Err(error) = recovery::retain(path, "failed") {
+                        eprintln!("Could not retain failed recording: {error:#}");
+                    }
+                } else if result.is_ok() && values.history_enabled {
+                    if let Err(error) = recovery::retain(path, "history") {
+                        eprintln!("Could not retain recording history: {error:#}");
+                    }
+                } else {
+                    recovery::discard(Some(path));
+                }
+            }
             let _ = tx.send_blocking(Event::Transcribed(generation, result));
         }));
     }
@@ -344,27 +467,33 @@ impl AppState {
         self.stop_pending = false;
         self.media.resume();
         if let Some(recorder) = self.recorder.take() {
+            recorder.cancel_eager();
+            let spool = self.recording_spool.take();
             self.workers.push(thread::spawn(move || {
                 drop(recorder);
+                recovery::discard(spool.as_deref());
             }));
         }
-        if self.session.busy {
-            self.session.ready = false;
-            self.workers.push(self.engine.stop_in_background());
-        }
+        self.session.unloaded = true;
+        self.workers.push(self.engine.stop_in_background());
         self.session.busy = false;
         self.publish("idle", "Cancelled", false, 0.0, 0.0);
     }
 
     fn save(&mut self, values: Config) -> bool {
-        if self.session.busy || matches!(self.session.phase, "starting" | "recording") {
+        if self.recovering
+            || self.downloading
+            || self.session.busy
+            || matches!(self.session.phase, "starting" | "recording")
+        {
             if let Some(home) = &self.home {
-                home.feedback("Finish or cancel dictation before changing settings");
+                home.feedback("Finish recovery, download or dictation before changing settings");
             }
             return false;
         }
         let shortcuts_changed = values.dictation_shortcut != self.values.dictation_shortcut
-            || values.cancel_shortcut != self.values.cancel_shortcut;
+            || values.cancel_shortcut != self.values.cancel_shortcut
+            || values.dictation_mode != self.values.dictation_mode;
         let saved = if shortcuts_changed {
             shortcuts::save(&values).map(|_| ())
         } else {
@@ -381,11 +510,22 @@ impl AppState {
             || old.server != values.server
             || old.language != values.language
             || old.threads != values.threads
+            || old.blank_penalty != values.blank_penalty
+            || old.max_active_paths != values.max_active_paths
+            || old.vad_threshold != values.vad_threshold
+            || old.vad_min_silence != values.vad_min_silence
+            || old.max_piece_seconds != values.max_piece_seconds
             || old.prompt != values.prompt
             || old.vocabulary_boosting != values.vocabulary_boosting
             || old.boost_score != values.boost_score
             || old.cut_silence != values.cut_silence
-            || old.noise_suppression != values.noise_suppression;
+            || old.noise_suppression != values.noise_suppression
+            || old.normalize_gain != values.normalize_gain
+            || old.feature_dim != values.feature_dim
+            || old.provider != values.provider
+            || old.soft_speech_retry != values.soft_speech_retry
+            || old.hallucination_filtering != values.hallucination_filtering
+            || old.anomaly_threshold != values.anomaly_threshold;
         self.values = values;
         if let Some(timer) = self.unloading.take() {
             timer.remove();
@@ -418,6 +558,54 @@ impl AppState {
         true
     }
 
+    fn retry(&mut self, kind: &'static str) {
+        if self.recovering
+            || self.downloading
+            || self.session.busy
+            || matches!(self.session.phase, "starting" | "recording")
+        {
+            return;
+        }
+        if kind == "failed" && !self.values.recover_recordings
+            || kind == "history" && !self.values.history_enabled
+        {
+            self.publish(
+                "error",
+                "Enable recording recovery or history before retrying audio",
+                true,
+                0.0,
+                0.0,
+            );
+            return;
+        }
+        self.session.generation += 1;
+        let generation = self.session.generation;
+        self.live.store(generation, Ordering::Release);
+        self.engine.prepare();
+        let epoch = self.engine.recording_epoch();
+        self.session.busy = true;
+        self.session.unloaded = false;
+        // A recovered recording has no trustworthy focused target; copy its text.
+        self.target = None;
+        self.publish("transcribing", "Retrying saved recording", true, 0.0, 0.0);
+        let values = self.values.clone();
+        let engine = self.engine.clone();
+        let live = self.live.clone();
+        let tx = self.tx.clone();
+        self.workers.push(thread::spawn(move || {
+            let cancelled = || generation != live.load(Ordering::Acquire);
+            let result = (|| {
+                let pcm = recovery::last(kind)?;
+                validate_recording_length(pcm.len())?;
+                engine.ensure_scoped(epoch, &cancelled)?;
+                let transcript = engine.transcribe_detailed_scoped(&pcm, epoch, &cancelled)?;
+                let (raw, text, note) = finish_recognition(transcript, &values, cancelled)?;
+                Ok((raw, text, note, false))
+            })();
+            let _ = tx.send_blocking(Event::Transcribed(generation, result));
+        }));
+    }
+
     fn download(&mut self) {
         if self.downloading
             || self.session.busy
@@ -430,12 +618,13 @@ impl AppState {
             home.set_downloading(true);
         }
         let tx = self.tx.clone();
+        let variant = self.values.model_variant.clone();
         thread::spawn(move || {
             let progress = tx.clone();
-            let result = setup::install(move |message| {
+            let result = setup::install_variant(&variant, move |message| {
                 let _ = progress.send_blocking(Event::Notice(message.to_string()));
             });
-            let _ = tx.send_blocking(Event::Downloaded(result));
+            let _ = tx.send_blocking(Event::Downloaded(variant, result));
         });
     }
 
@@ -454,11 +643,17 @@ impl AppState {
             }
             Event::Started(generation, result) => {
                 if !self.session.current(generation) {
-                    self.workers.push(thread::spawn(move || drop(result)));
+                    self.workers.push(thread::spawn(move || {
+                        if let Ok((recorder, _, spool)) = result {
+                            drop(recorder);
+                            recovery::discard(spool.as_deref());
+                        }
+                    }));
                     return;
                 }
                 match result {
-                    Ok((recorder, target)) => {
+                    Ok((recorder, target, spool)) => {
+                        self.recording_spool = spool;
                         self.recorder = Some(recorder);
                         self.target = target;
                         if self.stop_pending {
@@ -487,7 +682,11 @@ impl AppState {
             {
                 self.stop()
             }
+            Event::CaptureStopped(generation) if self.session.current(generation) => {
+                self.media.resume();
+            }
             Event::Transcribed(generation, result) if self.session.current(generation) => {
+                self.media.resume();
                 self.session.busy = false;
                 match result {
                     Err(error) => {
@@ -496,6 +695,7 @@ impl AppState {
                         self.publish("error", &format!("{error:#}"), true, 0.0, 0.0);
                     }
                     Ok((raw, text, note, silent)) => {
+                        self.session.ready = true;
                         if raw.is_empty() {
                             self.publish(
                                 "done",
@@ -542,12 +742,13 @@ impl AppState {
                         let tx = self.tx.clone();
                         let live = self.live.clone();
                         self.workers.push(thread::spawn(move || {
-                            let result = output::deliver_until(
+                            let result = output::deliver_guarded_until(
                                 &text,
                                 target.as_ref(),
                                 values.paste,
                                 values.trailing_space,
                                 values.press_enter,
+                                values.modifier_release_guard,
                                 || generation != live.load(Ordering::Acquire),
                             )
                             .map(|message| {
@@ -575,7 +776,7 @@ impl AppState {
                     ),
                 }
             }
-            Event::Downloaded(result) => {
+            Event::Downloaded(variant, result) => {
                 self.downloading = false;
                 if let Some(home) = &self.home {
                     home.set_downloading(false);
@@ -583,6 +784,19 @@ impl AppState {
                 match result {
                     Ok((model, server)) => {
                         let mut values = self.values.clone();
+                        let spec = match setup::model_spec(&variant) {
+                            Ok(spec) => spec,
+                            Err(error) => {
+                                self.publish("error", &format!("{error:#}"), false, 0.0, 0.0);
+                                return;
+                            }
+                        };
+                        values.model_variant = variant;
+                        values.feature_dim = spec.feature_dim as i32;
+                        values.provider = "cpu".into();
+                        if !spec.boosting {
+                            values.vocabulary_boosting = false;
+                        }
                         values.model = model;
                         values.server = server;
                         values.language = "en".into();
@@ -594,6 +808,26 @@ impl AppState {
                         }
                     }
                     Err(error) => self.publish("error", &format!("{error:#}"), false, 0.0, 0.0),
+                }
+            }
+            Event::Recovered(result) => {
+                self.recovering = false;
+                match result {
+                    Ok(0) => {}
+                    Ok(count) => {
+                        self.show();
+                        if let Some(home) = &self.home {
+                            home.feedback(&format!(
+                                "Recovered {count} interrupted recording(s). Use Retry last failed."
+                            ));
+                        }
+                    }
+                    Err(error) => {
+                        self.show();
+                        if let Some(home) = &self.home {
+                            home.feedback(&format!("Recording recovery failed: {error:#}"));
+                        }
+                    }
                 }
             }
             Event::Notice(message) => {
@@ -614,12 +848,13 @@ impl AppState {
         self.media.resume();
         self.engine.stop();
         self.recorder.take();
+        recovery::discard(self.recording_spool.take().as_deref());
         audio::release();
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
         while let Ok(event) = self.rx.try_recv() {
-            drop(event);
+            discard_pending_capture(event);
         }
         output::finish_pending();
         if let Some(handle) = self.signals.take() {
@@ -650,7 +885,7 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
         .application_id("dev.hype.Flow")
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
-    for name in ["background", "toggle", "cancel"] {
+    for name in ["background", "toggle", "cancel", "press", "release"] {
         application.add_main_option(
             name,
             glib::Char::from(0),
@@ -699,6 +934,7 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
                 live: Arc::new(AtomicU64::new(0)),
                 engine: Arc::new(Engine::new(values.clone(), runtime.clone())),
                 recorder: None,
+                recording_spool: None,
                 workers: Vec::new(),
                 stop_pending: false,
                 target: None,
@@ -714,6 +950,7 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
                 unloading: None,
                 settling: None,
                 downloading: false,
+                recovering: false,
                 signals: None,
             })
         });
@@ -723,6 +960,11 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
             "show",
             "copy-last",
             "copy-raw",
+            "retry-last",
+            "retry-history",
+            "clear-recordings",
+            "press",
+            "release",
             "quit",
             "download",
             "shortcuts",
@@ -798,6 +1040,15 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
                 }
             });
         }
+        if values.recover_recordings || values.history_enabled {
+            let tx = tx.clone();
+            app.borrow_mut().recovering = true;
+            let recovery = thread::spawn(move || {
+                let result = recovery::recover_interrupted();
+                let _ = tx.send_blocking(Event::Recovered(result));
+            });
+            app.borrow_mut().workers.push(recovery);
+        }
         if setup::assets_ready(&values) {
             app.borrow_mut().warm();
         } else {
@@ -820,6 +1071,10 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
                 app.command("toggle");
             } else if options.contains("cancel") {
                 app.command("cancel");
+            } else if options.contains("press") {
+                app.command("press");
+            } else if options.contains("release") {
+                app.command("release");
             } else if !options.contains("background") {
                 app.command("show");
             }
@@ -837,4 +1092,34 @@ pub fn run(values: Config) -> Result<glib::ExitCode> {
         anyhow::bail!(error);
     }
     Ok(code)
+}
+
+#[cfg(test)]
+mod finish_tests {
+    use super::*;
+    #[test]
+    fn live_and_retried_recordings_require_three_hundred_milliseconds() {
+        assert!(validate_recording_length(0).is_err());
+        assert!(validate_recording_length(MIN_RECORDING_BYTES - 2).is_err());
+        assert!(validate_recording_length(MIN_RECORDING_BYTES).is_ok());
+    }
+
+    #[test]
+    fn anomaly_filter_preserves_original_and_cancellation_wins() {
+        let values = Config {
+            hallucination_filtering: true,
+            ..Config::default()
+        };
+        let transcript = crate::backend::Transcription {
+            text: "original words".into(),
+            anomaly_score: 4.0,
+            ..Default::default()
+        };
+        let (raw, cleaned, notice) =
+            finish_recognition(transcript.clone(), &values, || false).unwrap();
+        assert_eq!(raw, "original words");
+        assert!(cleaned.is_empty());
+        assert!(notice.unwrap().contains("original saved"));
+        assert!(finish_recognition(transcript, &values, || true).is_err());
+    }
 }

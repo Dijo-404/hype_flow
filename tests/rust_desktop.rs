@@ -137,6 +137,7 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
             ("prompt", Control::Entry(entry)) => entry.set_text("नमस्ते, niri"),
             ("paste", Control::Switch(switch)) => switch.set_active(false),
             ("boost_score", Control::Number(spin)) => spin.set_value(2.0),
+            ("model_variant", Control::Choice(dropdown, _)) => dropdown.set_selected(1),
             ("corrections", Control::Text(buffer)) => buffer.set_text("open ai => OpenAI"),
             _ => {}
         }
@@ -151,6 +152,8 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     assert_eq!(config.boost_score, 2.0);
     assert_eq!(config.corrections, "open ai => OpenAI");
     assert_eq!(config.model, values.model);
+    assert_eq!(config.model_variant, "low-memory");
+    assert_eq!(config.feature_dim, values.feature_dim);
     assert_eq!(config.threads, 3);
     assert!(!home.save_button.is_sensitive());
     for (key, control) in &home.controls {

@@ -1,0 +1,186 @@
+{
+  "metadata": {
+    "repetitions": 3,
+    "commands": {
+      "rust": [
+        "/home/dj/projects/hype_flow/target/release/hype-flow"
+      ]
+    },
+    "audio": "/tmp/hype-flow-eval/jfk.wav",
+    "audio_sha256": "d7d4e74b8a333ed02186008bc109a1b1a19d16da668bd56e785d80d69a16a72f",
+    "audio_seconds": 11.0,
+    "paced_capture": true,
+    "worker": "/home/dj/projects/hype_flow/.migration/completion-assets/backend/parakeet/recognizer",
+    "worker_sha256": "9b5665daa09b8664bafe399d6091099ae6e9b50578c50b5dede783c7a80b76e7",
+    "model": "/home/dj/projects/hype_flow/.migration/completion-assets/models/parakeet-unified-en-int8",
+    "rust_sha256": "f913153bd4fea6341c506c45107c6ba5f5d245adda0c921f8ac65a99264fdc4a"
+  },
+  "samples": {
+    "rust": {
+      "ready_with_model": [
+        {
+          "startup_ms": 1713.965062,
+          "rss_kib": 1045604,
+          "pss_kib": 1008745,
+          "processes": [
+            {
+              "pid": 2757903,
+              "executable": "hype-flow",
+              "rss_kib": 61548,
+              "pss_kib": 32167
+            },
+            {
+              "pid": 2757917,
+              "executable": "bwrap",
+              "rss_kib": 2172,
+              "pss_kib": 155
+            },
+            {
+              "pid": 2757918,
+              "executable": "bwrap",
+              "rss_kib": 1332,
+              "pss_kib": 127
+            },
+            {
+              "pid": 2757919,
+              "executable": "recognizer",
+              "rss_kib": 980552,
+              "pss_kib": 976296
+            }
+          ]
+        },
+        {
+          "startup_ms": 1717.338883,
+          "rss_kib": 1038932,
+          "pss_kib": 1001774,
+          "processes": [
+            {
+              "pid": 2758139,
+              "executable": "hype-flow",
+              "rss_kib": 62020,
+              "pss_kib": 32330
+            },
+            {
+              "pid": 2758150,
+              "executable": "bwrap",
+              "rss_kib": 2164,
+              "pss_kib": 155
+            },
+            {
+              "pid": 2758151,
+              "executable": "bwrap",
+              "rss_kib": 1336,
+              "pss_kib": 132
+            },
+            {
+              "pid": 2758152,
+              "executable": "recognizer",
+              "rss_kib": 973412,
+              "pss_kib": 969157
+            }
+          ]
+        },
+        {
+          "startup_ms": 1707.357513,
+          "rss_kib": 1052016,
+          "pss_kib": 1015060,
+          "processes": [
+            {
+              "pid": 2758349,
+              "executable": "hype-flow",
+              "rss_kib": 61800,
+              "pss_kib": 32366
+            },
+            {
+              "pid": 2758360,
+              "executable": "bwrap",
+              "rss_kib": 2172,
+              "pss_kib": 129
+            },
+            {
+              "pid": 2758361,
+              "executable": "bwrap",
+              "rss_kib": 1336,
+              "pss_kib": 113
+            },
+            {
+              "pid": 2758362,
+              "executable": "recognizer",
+              "rss_kib": 986708,
+              "pss_kib": 982452
+            }
+          ]
+        }
+      ],
+      "idle_without_model": [
+        {
+          "startup_ms": 211.580013,
+          "rss_kib": 61604,
+          "pss_kib": 32141,
+          "processes": [
+            {
+              "pid": 2758123,
+              "executable": "hype-flow",
+              "rss_kib": 61604,
+              "pss_kib": 32141
+            }
+          ]
+        },
+        {
+          "startup_ms": 207.813587,
+          "rss_kib": 61984,
+          "pss_kib": 32433,
+          "processes": [
+            {
+              "pid": 2758132,
+              "executable": "hype-flow",
+              "rss_kib": 61984,
+              "pss_kib": 32433
+            }
+          ]
+        },
+        {
+          "startup_ms": 205.321637,
+          "rss_kib": 61612,
+          "pss_kib": 32199,
+          "processes": [
+            {
+              "pid": 2758657,
+              "executable": "hype-flow",
+              "rss_kib": 61612,
+              "pss_kib": 32199
+            }
+          ]
+        }
+      ],
+      "prerecorded_dictation": [
+        {
+          "shortcut_first_frame_ms": 117.510393,
+          "decode_cleanup_ms": 513.264378,
+          "delivery_ms": 259.926545,
+          "capture_end_to_paste_ms": 783.186922,
+          "raw_transcript_sha256": "cf552d42106192289c9064c97c0278cbaa258fc36d71eca04e38c1047bcfe97e"
+        },
+        {
+          "shortcut_first_frame_ms": 117.891949,
+          "decode_cleanup_ms": 484.517738,
+          "delivery_ms": 248.20604,
+          "capture_end_to_paste_ms": 745.040538,
+          "raw_transcript_sha256": "cf552d42106192289c9064c97c0278cbaa258fc36d71eca04e38c1047bcfe97e"
+        },
+        {
+          "shortcut_first_frame_ms": 127.554427,
+          "decode_cleanup_ms": 514.548691,
+          "delivery_ms": 253.395223,
+          "capture_end_to_paste_ms": 775.513234,
+          "raw_transcript_sha256": "cf552d42106192289c9064c97c0278cbaa258fc36d71eca04e38c1047bcfe97e"
+        }
+      ],
+      "capture_end_to_paste_percentiles_ms": {
+        "p50": 775.513234,
+        "p95": 783.186922
+      }
+    }
+  },
+  "limitations": "Paced capture shim and isolated GTK text target. 3 measured replay samples after warm-up."
+}

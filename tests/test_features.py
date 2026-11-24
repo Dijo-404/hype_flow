@@ -38,7 +38,7 @@ class NearMissTests(unittest.TestCase):
         self.assertEqual(near_misses("Charge B, che", VOCABULARY, 0.18), "ChargeBee, che")
 
     def test_explicit_rules_win_and_code_is_untouched(self):
-        values = {"prompt": "OpenAI, ChargeBee", "corrections": "open ai tools => the SDK", "blocked_words": "um"}
+        values = {"fuzzy_vocabulary": True, "prompt": "OpenAI, ChargeBee", "corrections": "open ai tools => the SDK", "blocked_words": "um"}
         self.assertEqual(process("open ai tools, um, via `charge b`", values), "the SDK via `charge b`")
         self.assertEqual(process("open a i works", {**values, "fuzzy_vocabulary": False}), "open a i works")
 

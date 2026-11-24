@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "repetitions": 1,
+    "commands": {
+      "rust": [
+        "/home/dj/projects/hype_flow/target/release/hype-flow"
+      ]
+    },
+    "audio": "/tmp/hype-flow-eval/jfk.wav",
+    "audio_sha256": "d7d4e74b8a333ed02186008bc109a1b1a19d16da668bd56e785d80d69a16a72f",
+    "worker": "/home/dj/projects/hype_flow/.migration/accuracy-assets/backend/parakeet/recognizer",
+    "worker_sha256": "52011a2991f9b28e562ade355db8bbf6282705ff99feaaa026b76de3b8fbaa5a",
+    "model": "/home/dj/projects/hype_flow/.migration/accuracy-assets/models/parakeet-unified-en-int8",
+    "rust_sha256": "840c5eaf940146f0827d43ccac331502a1149cd769b15506f5b1c78ea6fafc26"
+  },
+  "samples": {
+    "rust": {
+      "ready_with_model": [
+        {
+          "startup_ms": 2868.071053,
+          "rss_kib": 1028088,
+          "pss_kib": 990050,
+          "processes": [
+            {
+              "pid": 2452863,
+              "executable": "hype-flow",
+              "rss_kib": 61652,
+              "pss_kib": 31011
+            },
+            {
+              "pid": 2452901,
+              "executable": "bwrap",
+              "rss_kib": 2172,
+              "pss_kib": 143
+            },
+            {
+              "pid": 2452902,
+              "executable": "bwrap",
+              "rss_kib": 1332,
+              "pss_kib": 120
+            },
+            {
+              "pid": 2452905,
+              "executable": "recognizer",
+              "rss_kib": 962932,
+              "pss_kib": 958776
+            }
+          ]
+        }
+      ],
+      "idle_without_model": [
+        {
+          "startup_ms": 383.899598,
+          "rss_kib": 61696,
+          "pss_kib": 31026,
+          "processes": [
+            {
+              "pid": 2453101,
+              "executable": "hype-flow",
+              "rss_kib": 61696,
+              "pss_kib": 31026
+            }
+          ]
+        }
+      ],
+      "prerecorded_dictation": [
+        {
+          "shortcut_first_frame_ms": 192.920004,
+          "decode_cleanup_ms": 838.981284,
+          "delivery_ms": 301.798104,
+          "capture_end_to_paste_ms": 1160.972939,
+          "raw_transcript_sha256": "cf552d42106192289c9064c97c0278cbaa258fc36d71eca04e38c1047bcfe97e"
+        }
+      ]
+    }
+  },
+  "limitations": "One measured release-build sample after warm-up, under nested niri with capture shims. Not a representative latency benchmark or real microphone test."
+}

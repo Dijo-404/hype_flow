@@ -1,0 +1,36 @@
+# Reproducible evaluation baseline. Never reads the live user configuration.
+# Model and worker default to the standard XDG installation; override paths with --set.
+language = "en"
+model_variant = "unified"
+prompt = ""
+threads = 4
+vocabulary_boosting = false
+boost_score = 1.5
+auto_correct = true
+corrections = ""
+filter_words = true
+blocked_words = "um, uh, erm, umm, uhh"
+remove_repetitions = false
+fuzzy_vocabulary = false
+fuzzy_tolerance = 0.18
+cut_silence = true
+noise_suppression = false
+max_piece_seconds = 15
+vad_threshold = 0.3
+vad_min_silence = 0.45
+blank_penalty = 0.0
+max_active_paths = 4
+modifier_release_guard = false
+normalize_gain = false
+# Explicit baseline for optional processing and runtime controls.
+feature_dim = 128
+provider = "cpu"
+soft_speech_retry = false
+confidence_filtering = false
+confidence_threshold = -1.0
+hallucination_filtering = false
+anomaly_threshold = 3.0
+spoken_commands = false
+remove_restarts = false
+format_numbers = false
+capitalize_after_filler = false

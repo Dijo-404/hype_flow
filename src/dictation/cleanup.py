@@ -1,6 +1,6 @@
 """Literal, reversible transcript cleanup. No language model or guessed spelling."""
 
-import math
+from pathlib import Path
 import re
 
 from .vocabulary import terms
@@ -8,6 +8,9 @@ from .vocabulary import terms
 
 DEFAULT_FILTERS = "um, uh, erm, umm, uhh"
 _PROTECTED = re.compile(r"(https?://\S+|www\.\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|`[^`\n]*`|\"[^\"\n]*\"|(?<!\w)'[^'\n]*'(?!\w))")
+_COMMON_WORDS = frozenset(Path(__file__).with_name("common_words.txt").read_text().splitlines())
+_NOISE_TAGS = re.compile(r"<unk>|\[(?:blank_audio|silence|noise|music|inaudible|applause)\]", re.IGNORECASE)
+_LEGITIMATE_DOUBLES = {"had", "that", "very", "no", "yes", "ha", "so"}
 _WORD_EDGE = r"[\w'’\-]"
 
 
@@ -74,21 +77,35 @@ def _distance(first, second):
     return previous[-1]
 
 
+def _consonants(value):
+    result = ""
+    for letter in value:
+        if letter not in "aeiouhw" and not result.endswith(letter):
+            result += letter
+    return result
+
+
 def _closest(candidate, keys, tolerance):
     if not candidate.isascii() or not candidate.isalnum() or len(candidate) > 50:
         return None
-    best, best_score = None, math.inf
+    exact = {word for key, word in keys if key == candidate}
+    if exact:
+        return (next(iter(exact)), 0.0) if len(exact) == 1 else None
+    if len(candidate) <= 5 or candidate in _COMMON_WORDS:
+        return None
+    matches = {}
     for key, word in keys:
         longest = max(len(candidate), len(key))
         # At most a 25% length difference, so "openaigpt" cannot match "openai".
-        if abs(len(candidate) - len(key)) > max(longest * 0.25, 2):
+        if len(key) <= 5 or abs(len(candidate) - len(key)) > max(longest * 0.25, 2):
             continue
         score = _distance(candidate, key) / longest
-        if candidate.isalpha() and key.isalpha() and soundex(candidate) == soundex(key):
-            score *= 0.3  # Words that sound alike get a strong boost.
-        if score < tolerance and score < best_score:
-            best, best_score = word, score
-    return (best, best_score) if best else None
+        same_sound = candidate.isalpha() and key.isalpha() and soundex(candidate) == soundex(key)
+        # Vowel-heavy names such as Shunade/Sinead share a consonant skeleton.
+        name_match = same_sound and _consonants(candidate) == _consonants(key) and score <= 0.6
+        if score <= tolerance or same_sound and score <= 0.25 or name_match:
+            matches[word] = min(matches.get(word, 1.0), score)
+    return next(iter(matches.items())) if len(matches) == 1 else None
 
 
 def _edges(word):
@@ -123,7 +140,13 @@ def near_misses(text, vocabulary, tolerance):
             # Never join across punctuation: "Charge B, che" stops at the comma.
             if len(group) < size or any(_edges(word)[1] for word in group[:-1]):
                 continue
-            match = _closest("".join(_key(word) for word in group), keys, tolerance)
+            if any(any(character in word for character in "@/\\") for word in group):
+                continue
+            candidate = "".join(_key(word) for word in group)
+            exact = any(key == candidate for key, _ in keys)
+            if size > 1 and not exact and all(len(_key(word)) > 1 for word in group) and any(_key(word) in _COMMON_WORDS for word in group):
+                continue
+            match = _closest(candidate, keys, tolerance)
             if match and (best is None or match[1] < best[2]):
                 best = (size, match[0], match[1])
         if best:
@@ -137,19 +160,37 @@ def near_misses(text, vocabulary, tolerance):
     return " ".join(result)
 
 
+def _vocabulary_echo(text, vocabulary):
+    words = [word for word in map(_key, text.split()) if word]
+    if any(_key(term) not in _LEGITIMATE_DOUBLES and words.count(_key(term)) >= 3 and words.count(_key(term)) * 4 >= len(words) * 3 for term in vocabulary):
+        return True
+    cursor = matched = covered = 0
+    for term in vocabulary:
+        term_words = list(map(_key, term.split()))
+        for index in range(cursor, len(words) - len(term_words) + 1):
+            if words[index:index + len(term_words)] == term_words:
+                cursor = index + len(term_words)
+                covered += len(term_words)
+                matched += 1
+                break
+    return matched >= 3 and covered * 4 >= len(words) * 3
+
+
 def process(text, values):
     vocabulary = {term.casefold(): term for term in terms(values.get("prompt", ""))}
+    if not any(character.isalnum() for character in text) or values.get("vocabulary_boosting", False) and _vocabulary_echo(text, vocabulary.values()):
+        return ""
     replacements = corrections(values.get("corrections", ""))
     blocked = terms(values.get("blocked_words", DEFAULT_FILTERS))
     removed = False
     pieces = _PROTECTED.split(text)
     for index in range(0, len(pieces), 2):
-        plain = pieces[index]
+        plain = _NOISE_TAGS.sub(" ", pieces[index])
         if values.get("auto_correct", True):
             plain = _replace(plain, vocabulary)
             plain = _replace(plain, replacements)
         # After the literal rules, so an explicit correction always wins over a guess.
-        if values.get("fuzzy_vocabulary", True) and vocabulary and plain.strip():
+        if values.get("fuzzy_vocabulary", False) and vocabulary and plain.strip():
             lead, trail = plain[:len(plain) - len(plain.lstrip())], plain[len(plain.rstrip()):]
             plain = lead + near_misses(plain, list(vocabulary.values()), values.get("fuzzy_tolerance", 0.18)) + trail
         if values.get("filter_words", True) and blocked:
@@ -167,12 +208,12 @@ def process(text, values):
             plain = re.sub(pattern, remove, plain, flags=re.IGNORECASE)
         if values.get("remove_repetitions", False):
             # Consecutive words only. Never guess which entire phrase was a verbal restart.
-            plain = re.sub(r"\b([\w’'-]+)(?:\s+\1\b)+", r"\1", plain, flags=re.IGNORECASE)
+            plain = re.sub(r"\b([\w’'-]+)(?:\s+\1\b)+", lambda match: match[0] if match[1].lower() in _LEGITIMATE_DOUBLES else match[1], plain, flags=re.IGNORECASE)
         plain = re.sub(r"[ \t]+", " ", plain)
         plain = re.sub(r" +([,.;:!?])", r"\1", plain)
         pieces[index] = plain
     result = "".join(pieces).strip()
     result = re.sub(r"^[,;:]\s*", "", result)
-    if removed and not re.search(r"\w", result):
+    if not any(character.isalnum() for character in result) or removed and not re.search(r"\w", result):
         return ""
     return result

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import math
 from pathlib import Path
 import re
 import signal
@@ -107,11 +108,18 @@ import time
 root = Path(os.environ["HYPE_FLOW_BENCHMARK_ROOT"])
 pcm = (root / "capture.pcm").read_bytes()
 time.sleep(0.06)
-sys.stdout.buffer.write(pcm[:1600])
-sys.stdout.buffer.flush()
-time.sleep(0.08)
-sys.stdout.buffer.write(pcm[1600:])
-sys.stdout.buffer.flush()
+if os.environ.get("HYPE_FLOW_BENCHMARK_PACE") == "1":
+    started = time.monotonic()
+    for offset in range(0, len(pcm), 1600):
+        time.sleep(max(0, started + offset / 32000 - time.monotonic()))
+        sys.stdout.buffer.write(pcm[offset:offset + 1600])
+        sys.stdout.buffer.flush()
+else:
+    sys.stdout.buffer.write(pcm[:1600])
+    sys.stdout.buffer.flush()
+    time.sleep(0.08)
+    sys.stdout.buffer.write(pcm[1600:])
+    sys.stdout.buffer.flush()
 (root / "capture-end-ns").write_text(str(time.monotonic_ns()))
 """)
     return shim
@@ -186,7 +194,8 @@ def run_app(command, label, root, env, target, reference, assets, loaded):
                     current = state()
                     return current and current[0] == "done" and current
 
-                delivery = wait(done, "prerecorded transcription and paste", timeout=30)
+                replay_seconds = (root / "capture.pcm").stat().st_size / 32000 if env.get("HYPE_FLOW_BENCHMARK_PACE") == "1" else 0
+                delivery = wait(done, "prerecorded transcription and paste", timeout=30 + replay_seconds)
                 assert control.wait(timeout=5) == 0
             assert delivery[1] == "Pasted", delivery
             raw = (runtime / "last-raw-transcript.txt").read_text()
@@ -220,6 +229,13 @@ def run_app(command, label, root, env, target, reference, assets, loaded):
 
 def write_report(results, output):
     metadata, samples = results["metadata"], results["samples"]
+    for cases in samples.values():
+        measured = sorted(sample["capture_end_to_paste_ms"] for sample in cases["prerecorded_dictation"])
+        if measured:
+            cases["capture_end_to_paste_percentiles_ms"] = {
+                f"p{percent}": measured[math.ceil(len(measured) * percent / 100) - 1]
+                for percent in (50, 95)
+            }
     output.mkdir(parents=True, exist_ok=True)
     (output / "benchmarks.json").write_text(json.dumps(results, indent=2) + "\n")
     rows = [
@@ -276,19 +292,22 @@ def write_report(results, output):
     (output / "benchmark-report.md").write_text("\n".join(rows) + "\n")
 
 
+def replay_case(manifest):
+    pair = json.loads(manifest.read_text().splitlines()[0])
+    return manifest.parent / pair["audio"], normalized(pair["text"])
+
+
 def benchmark(args):
     root = Path(os.environ["HYPE_FLOW_BENCHMARK_ROOT"])
     private_runtime = root / "runtime"
     assert Path(os.environ["XDG_RUNTIME_DIR"]) == private_runtime
     assert Path(os.environ["NIRI_SOCKET"]).parent == private_runtime
     assets = args.assets
-    manifest = args.manifest
-    pair = json.loads(manifest.read_text().splitlines()[0])
-    audio_path = manifest.parent / pair["audio"]
-    reference = normalized(pair["text"])
+    audio_path, reference = replay_case(args.manifest)
     shim = create_capture(root, audio_path)
     env = os.environ.copy()
     env["PATH"] = str(shim) + os.pathsep + env["PATH"]
+    env["HYPE_FLOW_BENCHMARK_PACE"] = "1" if args.pace else "0"
     commands = {"python": [sys.executable, str(REPO / "tools/launch.py")],
                 "rust": [str(args.rust)]}
     if args.only:
@@ -299,6 +318,8 @@ def benchmark(args):
             "commands": commands,
             "audio": str(audio_path),
             "audio_sha256": digest(audio_path),
+            "audio_seconds": (root / "capture.pcm").stat().st_size / 32000,
+            "paced_capture": args.pace,
             "worker": str(assets / "backend/parakeet/recognizer"),
             "worker_sha256": digest(assets / "backend/parakeet/recognizer"),
             "model": str(assets / "models/parakeet-unified-en-int8"),
@@ -351,6 +372,7 @@ def main():
     parser.add_argument("--niri-config", type=Path, default=REPO / "tests/fixtures/niri.kdl")
     parser.add_argument("--output", type=Path, default=REPO / ".migration")
     parser.add_argument("--repetitions", type=int, default=5)
+    parser.add_argument("--pace", action="store_true", help="Replay capture at 16 kHz instead of in a burst")
     parser.add_argument("--only", choices=("python", "rust"))
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -367,6 +389,13 @@ def main():
         return
     if args.only != "python":
         assert args.rust.is_file(), f"Release app is unavailable: {args.rust}"
+    timeout = 300
+    if args.pace:
+        audio_path, _ = replay_case(args.manifest)
+        with wave.open(str(audio_path), "rb") as audio:
+            duration = audio.getnframes() / audio.getframerate()
+        app_count = 1 if args.only else 2
+        timeout += duration * (args.repetitions + 1) * app_count
     parent_display = Path(os.environ["WAYLAND_DISPLAY"])
     if not parent_display.is_absolute():
         parent_display = Path(os.environ["XDG_RUNTIME_DIR"]) / parent_display
@@ -382,12 +411,16 @@ def main():
             WAYLAND_DISPLAY=str(parent_display), XDG_RUNTIME_DIR=str(runtime),
             HYPE_FLOW_BENCHMARK_ROOT=str(root), GTK_A11Y="none", NO_AT_BRIDGE="1",
         )
+        driver_log = root / "driver.log"
         subprocess.run(
             ["dbus-run-session", "--", "niri", "-c", str(args.niri_config), "--",
+             "sh", "-c", 'log=$1; shift; exec "$@" > "$log" 2>&1', "sh", str(driver_log),
              sys.executable, str(Path(__file__).resolve()), "--inside", *sys.argv[1:]],
-            env=env, check=True, timeout=300,
+            env=env, check=True, timeout=timeout,
         )
-        assert (root / "complete").exists(), "Benchmark driver did not complete"
+        if not (root / "complete").exists():
+            details = driver_log.read_text(errors="replace") if driver_log.exists() else "Driver did not start"
+            raise RuntimeError(f"Benchmark driver did not complete\n{details}")
 
 
 if __name__ == "__main__":

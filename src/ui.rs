@@ -408,11 +408,11 @@ impl Home {
         let microphones = section(&pages[0], "Microphone");
         let feedback = section(&pages[0], "Feedback");
         let transcription = section(&pages[1], "Transcription");
-        transcription.append(&label("Parakeet Unified English", "model-title"));
-        transcription.append(&label("INT8 · 663 MB model files · English with punctuation and capitalization. Audio stays on this device.", "muted"));
+        transcription.append(&label("Offline English speech models", "model-title"));
+        transcription.append(&label("Unified favors accuracy. The 110M model uses less memory and may make more errors. Audio stays on this device.", "muted"));
         let model_status = label("Checking model…", "muted");
         transcription.append(&model_status);
-        let download_button = gtk::Button::with_label("Download model · 663 MB");
+        let download_button = gtk::Button::with_label("Install selected model");
         download_button.add_css_class("primary");
         download_button.set_halign(gtk::Align::Start);
         download_button.set_margin_start(14);
@@ -435,6 +435,12 @@ impl Home {
                 "paste",
                 "Paste after dictation",
                 "Insert text into the app where you started speaking.",
+                &dictation,
+            ),
+            (
+                "modifier_release_guard",
+                "Wait for shortcut keys to release",
+                "Experimental. Checks accessible keyboards before pasting; falls back to the standard delay.",
                 &dictation,
             ),
             (
@@ -482,7 +488,7 @@ impl Home {
             (
                 "vocabulary_boosting",
                 "Boost vocabulary during recognition",
-                "Experimental. Slows decoding and can insert unwanted words.",
+                "Available with Unified. Experimental and can insert unwanted words.",
                 &vocabulary,
             ),
             (
@@ -502,6 +508,60 @@ impl Home {
                 "Remove listed words and phrases",
                 "Preserve URLs, email addresses, quoted text and inline code.",
                 &filters,
+            ),
+            (
+                "recover_recordings",
+                "Recover failed recordings",
+                "Opt-in: stores failed and interrupted audio privately; keeps the latest 20. Retry copies text for review.",
+                &memory,
+            ),
+            (
+                "history_enabled",
+                "Keep recent recording history",
+                "Opt-in: stores the latest 20 successful recordings privately for re-transcription.",
+                &memory,
+            ),
+            (
+                "spoken_commands",
+                "Spoken punctuation and commands",
+                "Recognize punctuation names and whole-utterance New line, New paragraph and Scratch that.",
+                &repetitions,
+            ),
+            (
+                "remove_restarts",
+                "Remove spoken restarts",
+                "Experimental: removes bounded restarts and editing phrases such as I mean. Original remains recoverable.",
+                &repetitions,
+            ),
+            (
+                "format_numbers",
+                "Format numbers, money and times",
+                "Conservative English formatting; keeps ordinary phrases such as one of the things unchanged.",
+                &repetitions,
+            ),
+            (
+                "capitalize_after_filler",
+                "Capitalize after removing a filler",
+                "Capitalize sentence starts while preserving mixed-case identifiers.",
+                &filters,
+            ),
+            (
+                "confidence_filtering",
+                "Protect confidently recognized vocabulary",
+                "Only permit guessed vocabulary corrections on low-confidence words. Missing confidence prevents guessing.",
+                &near,
+            ),
+            (
+                "hallucination_filtering",
+                "Filter anomalous recognition",
+                "Experimental: reject improbable token timing and confidence patterns; needs calibration on your speech.",
+                &processing,
+            ),
+            (
+                "soft_speech_retry",
+                "Retry audible empty recognition",
+                "Experimental: retry once when VAD finds nothing but an energy gate detects speech-like input.",
+                &processing,
             ),
             (
                 "remove_repetitions",
@@ -527,6 +587,33 @@ impl Home {
         }
         for (key, title, detail, choices, group) in [
             (
+                "model_variant",
+                "Model to download",
+                "Save this choice, then download. Your active model stays in use until the download finishes.",
+                vec![
+                    ("unified".into(), "Unified English INT8 · 663 MB".into()),
+                    (
+                        "low-memory".into(),
+                        "Parakeet 110M TDT INT8 · 136.5 MB".into(),
+                    ),
+                    (
+                        "parakeet-ctc".into(),
+                        "Parakeet 110M CTC INT8 · 131.7 MB (default)".into(),
+                    ),
+                ],
+                &transcription,
+            ),
+            (
+                "dictation_mode",
+                "Shortcut behavior",
+                "Hold requires niri press/release bindings. Unsupported compositors keep the existing bindings.",
+                vec![
+                    ("toggle".into(), "Press to start and stop".into()),
+                    ("hold".into(), "Hold to dictate".into()),
+                ],
+                &dictation,
+            ),
+            (
                 "input_target",
                 "Input device",
                 "Used the next time you start dictating.",
@@ -537,12 +624,14 @@ impl Home {
                 "unload_minutes",
                 "Unload model when idle",
                 "Releases model memory and reloads while you speak.",
-                [0, 5, 10, 15, 30, 60]
+                crate::config::UNLOAD_CHOICES
                     .into_iter()
                     .map(|n| {
                         (
                             n.to_string(),
-                            if n == 0 {
+                            if n == crate::config::UNLOAD_AFTER_EACH {
+                                "After each dictation".into()
+                            } else if n == 0 {
                                 "Never".into()
                             } else {
                                 format!("After {n} minutes")
@@ -558,10 +647,11 @@ impl Home {
                 .map(|(_, description)| description.as_str())
                 .collect();
             let dropdown = gtk::DropDown::from_strings(&labels);
-            let current = if key == "unload_minutes" {
-                values.unload_minutes.to_string()
-            } else {
-                values.input_target.clone()
+            let current = match key {
+                "unload_minutes" => values.unload_minutes.to_string(),
+                "model_variant" => values.model_variant.clone(),
+                "dictation_mode" => values.dictation_mode.clone(),
+                _ => values.input_target.clone(),
             };
             dropdown.set_selected(
                 choices
@@ -665,6 +755,21 @@ impl Home {
                 "Copy original",
                 "Recognizer output before corrections and filtering.",
                 "copy-raw",
+            ),
+            (
+                "Retry last failed",
+                "Re-transcribe the latest failed or interrupted recording; copied for review.",
+                "retry-last",
+            ),
+            (
+                "Retry recent recording",
+                "Re-transcribe the latest retained successful recording; copied for review.",
+                "retry-history",
+            ),
+            (
+                "Delete saved recordings",
+                "Delete retained recovery and history audio. Disabling retention does not delete existing files.",
+                "clear-recordings",
             ),
         ] {
             let button = gtk::Button::with_label(title);
@@ -901,20 +1006,17 @@ impl Home {
         self.download_button.set_label(if downloading {
             "Installing…"
         } else {
-            "Download model · 663 MB"
+            "Install selected model"
         });
     }
 
     pub fn update(&self, state: &str, message: &str, ready: bool) {
         self.feedback(message);
-        self.download_button.set_visible(!ready);
+        self.download_button.set_visible(true);
         let model = std::path::Path::new(&self.values.borrow().model).to_path_buf();
         let installed = setup::MODEL_FILES
             .iter()
             .all(|name| model.join(name).is_file());
-        if installed {
-            self.download_button.set_label("Update speech support");
-        }
         self.model_status.set_label(if ready {
             "Installed on this device"
         } else if installed {

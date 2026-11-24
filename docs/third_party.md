@@ -1,12 +1,13 @@
 # Reuse and provenance
 
-Hype Flow uses sherpa-onnx with NVIDIA Parakeet Unified English INT8. The desktop is a native GTK application. It does not bundle OpenWhispr's Electron application or Handy's Tauri application.
+Hype Flow uses sherpa-onnx with NVIDIA Parakeet 110M CTC English INT8. The native
+GTK desktop also supports the 110M transducer export and Parakeet Unified.
 
 ## OpenWhispr reference
 
 Reference checkout: `007826d936af15e89291c1106042f1b280a75933`.
 
-The selected model, pinned sherpa-onnx version, and four required model files follow `src/models/modelRegistryData.json`, `src/helpers/parakeetModelInfo.js`, and `scripts/download-sherpa-onnx.js`. The CPU runtime is version **1.13.8**, using the upstream `shared-no-tts` archive, as in the reference.
+The Unified profile and its four required model files follow `src/models/modelRegistryData.json`, `src/helpers/parakeetModelInfo.js`, and `scripts/download-sherpa-onnx.js`. The CPU runtime remains version **1.13.8**, using the upstream `shared-no-tts` archive.
 
 `src/dictation/segments.py` ports `src/helpers/parakeetSegmentation.js` to PCM16. It moves 15-second chunk boundaries toward pauses without dropping, duplicating, or reordering samples, and absorbs tails up to 0.5 seconds. The native SDK handles inference; Hype Flow's Rust worker keeps the model loaded and exchanges PCM and results over anonymous pipes. It opens no HTTP or WebSocket server.
 
@@ -83,3 +84,71 @@ sh tools/generate-worker-bindings.sh /path/to/sherpa-onnx/c-api/c-api.h
 The script verifies the header digest, derives the 21-function allowlist from
 the preserved C reference, and supplies the complete bindgen command.
 Regeneration was verified byte-for-byte against the checked-in output.
+
+## Evaluation-only Whisper English normalizer
+
+`tools/normalizers/english.py`, `basic.py` and `english.json` derive from
+`whisper.cpp/tests/librispeech/normalizers` at commit
+`5eaee0cc9024eb9e9a99469199920c8b7f5cb9ec`. The code originates in OpenAI
+Whisper, copyright 2022 OpenAI, under the MIT license retained in
+[`tools/normalizers/LICENSE`](../tools/normalizers/LICENSE).
+The English number and spelling logic is retained; the three-element sliding
+window uses standard-library `zip`, and unused grapheme-splitting helpers are
+omitted, avoiding Python package dependencies. Rust evaluation embeds these
+sources and runs them through Python only for benchmark scoring.
+
+## Common-word vocabulary guard
+
+`src/dictation/common_words.txt` contains the first 5,000 entries of
+[high-frequency-vocabulary](https://github.com/arstgit/high-frequency-vocabulary)'s
+`10k.txt`, derived from Peter Norvig's word frequency compilation. The list is
+shared by the Rust cleanup implementation and retained Python oracle. Its MIT
+license and copyright notice are retained in
+[`common_words.LICENSE`](../src/dictation/common_words.LICENSE); source details
+are in [`common_words.SOURCE`](../src/dictation/common_words.SOURCE).
+
+The conservative fuzzy gate and legitimate repeated-word exceptions follow
+Voxtype's design. Exact matches, unique-target matching, bounded spelling
+edits, Soundex, and an exact consonant-skeleton check preserve known split-name
+and vowel-heavy-name cases. Soundex no longer reduces the edit-distance score.
+Fuzzy matching remains opt-in; no measured corpus-wide accuracy gain is claimed.
+
+
+## Conservative English number and restart processing
+
+`src/itn.rs`, `src/restarts.rs` and the word-diff helper in `src/text_diff.rs`
+adapt Voxtype's guarded processing at commit
+`4d26c1f40a71f4e9dbcedf13f1f2a887feefd96c`. Copyright 2025 Peter Jackson; the MIT license is retained in
+[licenses/voxtype.txt](licenses/voxtype.txt). They retain bounded restart anchors,
+function-word exclusions, whole-rewrite reconciliation and ordinary-word guards.
+Number conversion uses Apache-2.0 `text-processing-rs` 0.2.2, locked in
+`Cargo.lock` (crate source revision `34a9b62d64d95844d1916774054909fccee88f9a`); its license is retained in
+[licenses/text_processing_rs.txt](licenses/text_processing_rs.txt). This is a
+pure-Rust port of NeMo's English number grammars; it requires no additional model
+process. Formatting and restart editing are opt-in, and protected URLs, addresses,
+quotes and inline code bypass them.
+
+## Parakeet 110M profiles
+
+The 110M profiles use [NVIDIA and Suno's Parakeet TDT-CTC 110M English
+model](https://huggingface.co/nvidia/parakeet-tdt_ctc-110m), licensed under
+[Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
+Sherpa-onnx exports the CTC and transducer branches to ONNX and quantizes
+them to INT8. The same attribution applies to both exports.
+
+The default CTC profile uses the [official sherpa-onnx CTC archive](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2).
+The 104,337,827-byte download has SHA-256
+`17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b`,
+verified against the upstream release asset digest. The installed model and
+token table total 131,662,124 bytes.
+
+The TDT profile uses the transducer export.
+
+- Official asset: [sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2).
+- Download size: **108,035,095 bytes**.
+- Archive SHA-256: `f628312e9fdf8686374cb01a69425c41732529d540860311f16f37cbc32cfe9b`, checked against the upstream GitHub release asset digest.
+- Installed encoder, decoder, joiner and tokens: **136,490,421 bytes**.
+- Both 110M profiles use 80 features. Unified uses 128.
+
+Both 110M profiles use greedy decoding. Configured literal corrections and
+spelling and capitalization preferences apply after recognition.

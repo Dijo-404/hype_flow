@@ -32,7 +32,83 @@ pub const MODEL_FILES: &[&str] = &[
     "tokens.txt",
 ];
 pub const MODEL_BYTES: u64 = 663_043_117;
-pub const NATIVE_VERSION: &str = "4";
+const LOW_MEMORY_BYTES: u64 = 136_490_421;
+const LOW_MEMORY_NAME: &str = "parakeet-110m-en-int8";
+const LOW_MEMORY_SHA256: &str = "f628312e9fdf8686374cb01a69425c41732529d540860311f16f37cbc32cfe9b";
+const CTC_NAME: &str = "parakeet-110m-ctc-en-int8";
+const CTC_FILES: &[&str] = &["model.int8.onnx", "tokens.txt"];
+pub const DEFAULT_MODEL_VARIANT: &str = "parakeet-ctc";
+
+#[derive(Clone, Copy, Debug)]
+pub struct ModelSpec {
+    pub name: &'static str,
+    pub bytes: u64,
+    pub feature_dim: u32,
+    pub boosting: bool,
+    files: &'static [&'static str],
+    label: &'static str,
+    archive: &'static str,
+    sha256: &'static str,
+}
+
+pub fn model_spec(variant: &str) -> Result<ModelSpec> {
+    Ok(match variant {
+        "unified" => ModelSpec {
+            name: MODEL_NAME,
+            bytes: MODEL_BYTES,
+            feature_dim: 128,
+            boosting: true,
+            files: MODEL_FILES,
+            label: "Parakeet Unified English INT8",
+            archive: "sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming.tar.bz2",
+            sha256: MODEL_SHA256,
+        },
+        "low-memory" => ModelSpec {
+            name: LOW_MEMORY_NAME,
+            bytes: LOW_MEMORY_BYTES,
+            feature_dim: 80,
+            boosting: false,
+            files: MODEL_FILES,
+            label: "Parakeet 110M TDT English INT8",
+            archive: "sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2",
+            sha256: LOW_MEMORY_SHA256,
+        },
+        "parakeet-ctc" => ModelSpec {
+            name: CTC_NAME,
+            bytes: 131_662_124,
+            feature_dim: 80,
+            boosting: false,
+            files: CTC_FILES,
+            label: "Parakeet 110M CTC English INT8",
+            archive: "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2",
+            sha256: "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b",
+        },
+        _ => bail!("Unknown model_variant: {variant}"),
+    })
+}
+
+pub(crate) fn variant_for_path(model: &Path) -> &'static str {
+    match model.file_name().and_then(OsStr::to_str) {
+        Some(CTC_NAME) => "parakeet-ctc",
+        Some(LOW_MEMORY_NAME) => "low-memory",
+        _ if model.join("model.int8.onnx").is_file()
+            && !model.join("encoder.int8.onnx").is_file() =>
+        {
+            "parakeet-ctc"
+        }
+        _ => "unified",
+    }
+}
+
+pub fn model_files(model: &Path) -> &'static [&'static str] {
+    if variant_for_path(model) == "parakeet-ctc" {
+        CTC_FILES
+    } else {
+        MODEL_FILES
+    }
+}
+
+pub const NATIVE_VERSION: &str = "8";
 const TOKENIZER_REVISION: &str = "7a16ff98b72e5b0beba6f182a5357c704d977b15";
 const TOKENIZER_SHA256: &str = "07d4e5a63840a53ab2d4d106d2874768143fb3fbdd47938b3910d2da05bfb0a9";
 const AUDIO_MODELS: &[(&str, &str, &str)] = &[
@@ -51,13 +127,17 @@ const AUDIO_MODELS: &[(&str, &str, &str)] = &[
 pub fn assets_ready(values: &Config) -> bool {
     let model = Path::new(&values.model);
     let server = Path::new(&values.server);
+    let ctc = variant_for_path(model) == "parakeet-ctc";
     server.is_file()
-        && fs::read_to_string(server.with_file_name("recognizer.version"))
-            .is_ok_and(|version| version.trim() == NATIVE_VERSION)
-        && MODEL_FILES
+        && fs::read_to_string(server.with_file_name("recognizer.version")).is_ok_and(|version| {
+            let version = version.trim();
+            version == NATIVE_VERSION || !ctc && matches!(version, "6" | "7")
+        })
+        && model_files(model)
             .iter()
-            .chain(&["bpe.vocab"])
             .all(|name| model.join(name).is_file())
+        && (!(values.feature_dim == 128 || values.vocabulary_boosting)
+            || model.join("bpe.vocab").is_file())
         && model.parent().is_some_and(|parent| {
             AUDIO_MODELS
                 .iter()
@@ -225,7 +305,7 @@ fn stage_worker(runtime: &Path, source: &Path) -> Result<()> {
     Ok(())
 }
 
-fn extract_model(archive: &Path, model: &Path) -> Result<()> {
+fn extract_model(archive: &Path, model: &Path, files: &[&str], expected_bytes: u64) -> Result<()> {
     let mut bundle = Archive::new(BzDecoder::new(File::open(archive)?));
     fs::create_dir(model)?;
     let mut size = 0u64;
@@ -235,21 +315,21 @@ fn extract_model(archive: &Path, model: &Path) -> Result<()> {
         let Some(name) = path.file_name().and_then(OsStr::to_str) else {
             continue;
         };
-        if !MODEL_FILES.contains(&name) || !entry.header().entry_type().is_file() {
+        if !files.contains(&name) || !entry.header().entry_type().is_file() {
             continue;
         }
         ensure!(
-            entry.size() <= MODEL_BYTES - size,
+            entry.size() <= expected_bytes.saturating_sub(size),
             "Unexpected model size; installation rejected"
         );
         size += io::copy(&mut entry, &mut File::create_new(model.join(name))?)?;
     }
     ensure!(
-        MODEL_FILES.iter().all(|name| model.join(name).is_file()),
+        files.iter().all(|name| model.join(name).is_file()),
         "Incomplete model archive; installation rejected"
     );
     ensure!(
-        size == MODEL_BYTES,
+        size == expected_bytes,
         "Unexpected model size; installation rejected"
     );
     Ok(())
@@ -353,6 +433,11 @@ fn activate(stage: TempDir, targets: &[(PathBuf, PathBuf)]) -> Result<()> {
 }
 
 pub fn install(progress: impl Fn(&str)) -> Result<(String, String)> {
+    install_variant("unified", progress)
+}
+
+pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String, String)> {
+    let specification = model_spec(variant)?;
     ensure!(
         cfg!(all(target_arch = "x86_64", target_os = "linux")),
         "The bundled speech runtime supports Linux x86_64"
@@ -388,12 +473,15 @@ pub fn install(progress: impl Fn(&str)) -> Result<(String, String)> {
         BACKEND_SHA256,
         &progress,
     )?;
-    let model_archive = downloads.join(format!("{MODEL_NAME}.tar.bz2"));
+    let model_archive = downloads.join(format!("{}.tar.bz2", specification.name));
     download(
         &client,
-        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming.tar.bz2",
+        &format!(
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}",
+            specification.archive
+        ),
         &model_archive,
-        MODEL_SHA256,
+        specification.sha256,
         &progress,
     )?;
     let backend = root.join("backend");
@@ -410,22 +498,30 @@ pub fn install(progress: impl Fn(&str)) -> Result<(String, String)> {
     progress("Installing speech runtime");
     extract_runtime(&archive, &runtime)?;
     stage_worker(&runtime, &shipped_worker)?;
-    progress("Installing Parakeet Unified English INT8");
-    extract_model(&model_archive, &model)?;
-    let tokenizer = downloads.join("parakeet-unified-tokenizer.model");
-    download(
-        &client,
-        &format!(
-            "https://huggingface.co/eschmidbauer/parakeet-unified-en-0.6b-onnx/resolve/{TOKENIZER_REVISION}/onnx_int8/tokenizer.model"
-        ),
-        &tokenizer,
-        TOKENIZER_SHA256,
-        &progress,
+    progress(&format!("Installing {}", specification.label));
+    extract_model(
+        &model_archive,
+        &model,
+        specification.files,
+        specification.bytes,
     )?;
-    let vocabulary = sentencepiece_vocabulary(&fs::read(tokenizer)?, &model.join("tokens.txt"))?;
-    fs::write(model.join("bpe.vocab"), vocabulary)?;
+    if specification.boosting {
+        let tokenizer = downloads.join("parakeet-unified-tokenizer.model");
+        download(
+            &client,
+            &format!(
+                "https://huggingface.co/eschmidbauer/parakeet-unified-en-0.6b-onnx/resolve/{TOKENIZER_REVISION}/onnx_int8/tokenizer.model"
+            ),
+            &tokenizer,
+            TOKENIZER_SHA256,
+            &progress,
+        )?;
+        let vocabulary =
+            sentencepiece_vocabulary(&fs::read(tokenizer)?, &model.join("tokens.txt"))?;
+        fs::write(model.join("bpe.vocab"), vocabulary)?;
+    }
 
-    let model_target = models.join(MODEL_NAME);
+    let model_target = models.join(specification.name);
     let runtime_target = backend.join("parakeet");
     let server_target = runtime_target.join("recognizer");
     let model_path = model_target
@@ -450,6 +546,82 @@ mod tests {
         os::unix::fs::PermissionsExt,
         thread,
     };
+
+    #[test]
+    fn low_memory_catalog_and_greedy_readiness_do_not_require_fake_bpe() {
+        let low = model_spec("low-memory").unwrap();
+        assert_eq!(low.feature_dim, 80);
+        assert!(!low.boosting);
+        assert!(low.bytes < model_spec("unified").unwrap().bytes / 4);
+        assert_eq!(
+            low.sha256,
+            "f628312e9fdf8686374cb01a69425c41732529d540860311f16f37cbc32cfe9b"
+        );
+        assert!(model_spec("unrecognized").is_err());
+        let root = tempfile::tempdir().unwrap();
+        let model = root.path().join(low.name);
+        fs::create_dir(&model).unwrap();
+        for name in MODEL_FILES {
+            fs::write(model.join(name), b"fixture").unwrap();
+        }
+        for (name, _, _) in AUDIO_MODELS {
+            fs::write(root.path().join(name), b"fixture").unwrap();
+        }
+        let server = root.path().join("recognizer");
+        fs::write(&server, b"fixture").unwrap();
+        fs::write(server.with_file_name("recognizer.version"), NATIVE_VERSION).unwrap();
+        let mut values = Config {
+            model: model.to_string_lossy().into_owned(),
+            server: server.to_string_lossy().into_owned(),
+            feature_dim: 80,
+            ..Config::default()
+        };
+        assert!(assets_ready(&values));
+        fs::write(server.with_file_name("recognizer.version"), "6\n").unwrap();
+        assert!(assets_ready(&values));
+        values.vocabulary_boosting = true;
+        assert!(!assets_ready(&values));
+        fs::write(model.join("bpe.vocab"), b"fixture").unwrap();
+        assert!(assets_ready(&values));
+
+        let model = root.path().join(CTC_NAME);
+        fs::create_dir(&model).unwrap();
+        for name in CTC_FILES {
+            fs::write(model.join(name), b"fixture").unwrap();
+        }
+        values.model = model.to_string_lossy().into_owned();
+        values.vocabulary_boosting = false;
+        assert!(!assets_ready(&values));
+        fs::write(server.with_file_name("recognizer.version"), "7\n").unwrap();
+        assert!(!assets_ready(&values));
+        fs::write(server.with_file_name("recognizer.version"), NATIVE_VERSION).unwrap();
+        assert!(assets_ready(&values));
+    }
+
+    #[test]
+    fn each_model_archive_obeys_its_own_exact_size_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("fixture.tar.bz2");
+        let compressed = bzip2::write::BzEncoder::new(
+            File::create(&archive).unwrap(),
+            bzip2::Compression::default(),
+        );
+        let mut builder = tar::Builder::new(compressed);
+        for name in MODEL_FILES {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(1);
+            header.set_mode(0o600);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, format!("export/{name}"), &b"x"[..])
+                .unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+        extract_model(&archive, &root.path().join("valid"), MODEL_FILES, 4).unwrap();
+        assert!(!root.path().join("valid/bpe.vocab").exists());
+        assert!(extract_model(&archive, &root.path().join("too-small"), MODEL_FILES, 3).is_err());
+        assert!(extract_model(&archive, &root.path().join("too-large"), MODEL_FILES, 5).is_err());
+    }
 
     #[test]
     fn stages_shipped_worker_without_a_compiler_and_rejects_bad_sources() {
@@ -497,7 +669,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(runtime.join("recognizer.version")).unwrap(),
-            "4\n"
+            format!("{NATIVE_VERSION}\n")
         );
     }
 

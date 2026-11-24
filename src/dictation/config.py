@@ -46,7 +46,7 @@ def load():
         "filter_words": True,
         "blocked_words": DEFAULT_FILTERS,
         "remove_repetitions": False,
-        "fuzzy_vocabulary": True,
+        "fuzzy_vocabulary": False,
         "fuzzy_tolerance": 0.18,
         "sounds": True,
         "pause_media": True,

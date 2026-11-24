@@ -10,6 +10,10 @@ use crate::vocabulary::{
     casefold, normalize_spaces, split_lines, terms, uppercase_first, whitespace,
 };
 
+static COMMON_WORDS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| include_str!("dictation/common_words.txt").lines().collect());
+const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so"];
+
 pub const DEFAULT_FILTERS: &str = "um, uh, erm, umm, uhh";
 
 // Python regex uses alphanumerics and underscore for \w, omitting combining marks.
@@ -36,6 +40,9 @@ static REPEATED: LazyLock<FancyRegex> = LazyLock::new(|| {
     FancyRegex::new(&format!(r"{BOUNDARY}({EDGE}+)(?:{SPACE}+\1{BOUNDARY})+")).unwrap()
 });
 static HORIZONTAL_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t]+").unwrap());
+static NOISE_TAGS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)<unk>|\[(?:blank_audio|silence|noise|music|inaudible|applause)\]").unwrap()
+});
 static PUNCTUATION_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" +([,.;:!?])").unwrap());
 
 pub(crate) fn corrections(value: &str) -> Result<Vec<(String, String)>> {
@@ -242,6 +249,16 @@ fn fuzzy_keys(vocabulary: &[(String, String)]) -> Vec<FuzzyKey<'_>> {
     keys
 }
 
+fn consonants(value: &str) -> String {
+    let mut result = String::new();
+    for letter in value.chars().filter(|letter| !"aeiouhw".contains(*letter)) {
+        if !result.ends_with(letter) {
+            result.push(letter);
+        }
+    }
+    result
+}
+
 fn closest<'a>(
     candidate: &str,
     keys: &'a [FuzzyKey<'a>],
@@ -250,27 +267,42 @@ fn closest<'a>(
     if candidate.is_empty() || candidate.len() > 50 || !candidate.is_ascii() {
         return None;
     }
+    let exact: HashSet<_> = keys
+        .iter()
+        .filter(|key| key.key == candidate)
+        .map(|key| key.word)
+        .collect();
+    if !exact.is_empty() {
+        return (exact.len() == 1).then(|| (*exact.iter().next().unwrap(), 0.0));
+    }
+    if candidate.len() <= 5 || COMMON_WORDS.contains(candidate) {
+        return None;
+    }
     let sound = candidate
         .bytes()
         .all(|byte| byte.is_ascii_alphabetic())
         .then(|| soundex(candidate));
-    let mut best = None;
-    let mut best_score = tolerance;
+    let mut matches = HashMap::new();
     for key in keys {
         let longest = candidate.len().max(key.key.len());
-        if candidate.len().abs_diff(key.key.len()) as f64 > (longest as f64 * 0.25).max(2.0) {
+        if key.key.len() <= 5
+            || candidate.len().abs_diff(key.key.len()) as f64 > (longest as f64 * 0.25).max(2.0)
+        {
             continue;
         }
-        let mut score = distance(candidate, &key.key) as f64 / longest as f64;
-        if sound.is_some() && sound == key.sound {
-            score *= 0.3;
-        }
-        if score < best_score {
-            best = Some((key.word, score));
-            best_score = score;
+        let score = distance(candidate, &key.key) as f64 / longest as f64;
+        let same_sound = sound.is_some() && sound == key.sound;
+        // Vowel-heavy names such as Shunade/Sinead share a consonant skeleton.
+        let name_match =
+            same_sound && consonants(candidate) == consonants(&key.key) && score <= 0.6;
+        if score <= tolerance || same_sound && score <= 0.25 || name_match {
+            matches
+                .entry(key.word)
+                .and_modify(|value: &mut f64| *value = value.min(score))
+                .or_insert(score);
         }
     }
-    best
+    (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
 }
 
 fn edges(word: &str) -> (&str, &str) {
@@ -292,7 +324,12 @@ fn cased(original: &str, replacement: &str) -> String {
     replacement.to_owned()
 }
 
-fn near_misses(text: &str, keys: &[FuzzyKey<'_>], tolerance: f64) -> String {
+fn near_misses(
+    text: &str,
+    keys: &[FuzzyKey<'_>],
+    tolerance: f64,
+    allowed: Option<&HashSet<String>>,
+) -> String {
     if keys.is_empty() {
         return text.to_owned();
     }
@@ -306,7 +343,7 @@ fn near_misses(text: &str, keys: &[FuzzyKey<'_>], tolerance: f64) -> String {
     let mut index = 0;
     while index < words.len() {
         let mut best = None;
-        let mut best_score = tolerance;
+        let mut best_score = f64::INFINITY;
         for size in (1..=3.min(words.len() - index)).rev() {
             let end = index + size;
             if word_edges[index..end - 1]
@@ -315,8 +352,32 @@ fn near_misses(text: &str, keys: &[FuzzyKey<'_>], tolerance: f64) -> String {
             {
                 continue;
             }
+            if words[index..end]
+                .iter()
+                .any(|word| word.contains(['@', '/', '\\']))
+            {
+                continue;
+            }
+            if allowed.is_some_and(|allowed| {
+                word_keys[index..end]
+                    .iter()
+                    .any(|word| !allowed.contains(word))
+            }) {
+                continue;
+            }
             let candidate = word_keys[index..end].concat();
-            if let Some((word, score)) = closest(&candidate, keys, best_score) {
+            let exact = keys.iter().any(|key| key.key == candidate);
+            let ordinary_phrase = size > 1
+                && word_keys[index..end].iter().all(|word| word.len() > 1)
+                && word_keys[index..end]
+                    .iter()
+                    .any(|word| COMMON_WORDS.contains(word.as_str()));
+            if ordinary_phrase && !exact {
+                continue;
+            }
+            if let Some((word, score)) = closest(&candidate, keys, tolerance)
+                && score < best_score
+            {
                 best = Some((end, word));
                 best_score = score;
             }
@@ -353,6 +414,9 @@ fn remove_repetitions(text: &str) -> Result<String> {
         let captures = captures?;
         let repetition = captures.get(0).unwrap();
         let first_word = captures.get(1).unwrap();
+        if LEGITIMATE_DOUBLES.contains(&first_word.as_str()) {
+            continue;
+        }
         output.push_str(&text[end..offsets[repetition.start()]]);
         output.push_str(&text[offsets[first_word.start()]..offsets[first_word.end()]]);
         end = offsets[repetition.end()];
@@ -361,11 +425,88 @@ fn remove_repetitions(text: &str) -> Result<String> {
     Ok(output)
 }
 
+fn vocabulary_echo(text: &str, vocabulary: &[(String, String)]) -> bool {
+    let words: Vec<_> = text
+        .split_whitespace()
+        .map(key)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() {
+        return false;
+    }
+    if vocabulary.iter().any(|(_, term)| {
+        let term = key(term);
+        !LEGITIMATE_DOUBLES.contains(&term.as_str())
+            && words.iter().filter(|word| **word == term).count() >= 3
+            && words.iter().filter(|word| **word == term).count() * 4 >= words.len() * 3
+    }) {
+        return true;
+    }
+    let mut cursor = 0;
+    let mut matched = 0;
+    let mut covered = 0;
+    for (_, term) in vocabulary {
+        let term_words: Vec<_> = term.split_whitespace().map(key).collect();
+        if let Some(index) = words[cursor..]
+            .windows(term_words.len())
+            .position(|window| window == term_words)
+        {
+            cursor += index + term_words.len();
+            covered += term_words.len();
+            matched += 1;
+        }
+    }
+    matched >= 3 && covered * 4 >= words.len() * 3
+}
+
 pub fn process(text: &str, values: &Config) -> Result<String> {
+    process_with_confidence(text, values, &[])
+}
+
+/// Missing or ambiguous confidence never authorizes a guessed spelling change.
+pub fn process_with_confidence(
+    text: &str,
+    values: &Config,
+    words: &[crate::backend::WordConfidence],
+) -> Result<String> {
+    if values.spoken_commands
+        && let Some(command) = crate::text_processing::whole_command(text)
+    {
+        return Ok(command.into());
+    }
+    let mut confidence = HashMap::<String, bool>::new();
+    if values.confidence_filtering
+        && text
+            .split(whitespace)
+            .map(key)
+            .filter(|word| !word.is_empty())
+            .eq(words
+                .iter()
+                .map(|word| key(&word.text))
+                .filter(|word| !word.is_empty()))
+    {
+        for word in words {
+            let low = word.min_log_probability.is_finite()
+                && word.min_log_probability < values.confidence_threshold;
+            confidence
+                .entry(key(&word.text))
+                .and_modify(|allowed| *allowed &= low)
+                .or_insert(low);
+        }
+    }
+    let allowed: HashSet<String> = confidence
+        .into_iter()
+        .filter_map(|(word, low)| low.then_some(word))
+        .collect();
+    let allowed = values.confidence_filtering.then_some(&allowed);
     let vocabulary: Vec<_> = terms(&values.prompt)?
         .into_iter()
         .map(|term| (casefold(&term), term))
         .collect();
+    if !text.chars().any(alnum) || values.vocabulary_boosting && vocabulary_echo(text, &vocabulary)
+    {
+        return Ok(String::new());
+    }
     let rules = corrections(&values.corrections)?;
     let blocked = terms(&values.blocked_words)?;
     let vocabulary_rules = values
@@ -390,6 +531,17 @@ pub fn process(text: &str, values: &Config) -> Result<String> {
     };
     let mut removed = false;
     let mut plain = |mut text: String| -> Result<String> {
+        text = NOISE_TAGS.replace_all(&text, " ").into_owned();
+        if values.remove_restarts {
+            text = crate::restarts::collapse_restarts(&text);
+        }
+        // Resolve spoken punctuation before number grammars can consume its words.
+        if values.spoken_commands {
+            text = crate::text_processing::spoken_punctuation(&text);
+        }
+        if values.format_numbers {
+            text = crate::itn::apply(&text);
+        }
         if let Some(replacements) = &vocabulary_rules {
             text = replacements.apply(&text)?;
         }
@@ -403,8 +555,11 @@ pub fn process(text: &str, values: &Config) -> Result<String> {
             let trimmed_start = text.trim_start_matches(whitespace);
             let trimmed = trimmed_start.trim_end_matches(whitespace);
             let start = text.len() - trimmed_start.len();
-            let matched = near_misses(trimmed, keys, values.fuzzy_tolerance);
+            let matched = near_misses(trimmed, keys, values.fuzzy_tolerance, allowed);
             text.replace_range(start..start + trimmed.len(), &matched);
+        }
+        if values.spoken_commands {
+            text = crate::text_processing::spoken_punctuation(&text);
         }
         if let Some(filters) = &filters {
             text = edit_matches(&text, filters, |matched, output| {
@@ -446,8 +601,98 @@ pub fn process(text: &str, values: &Config) -> Result<String> {
         Some(rest) => rest.trim_start_matches(whitespace),
         None => result,
     };
-    if removed && !WORD_CHAR.is_match(result) {
+    if !result.chars().any(alnum) || removed && !WORD_CHAR.is_match(result) {
         return Ok(String::new());
     }
-    Ok(result.to_owned())
+    let result = result.to_owned();
+    Ok(
+        if values.capitalize_after_filler && removed || values.spoken_commands {
+            crate::text_processing::capitalize_sentences(
+                &result,
+                &PROTECTED
+                    .find_iter(&result)
+                    .filter_map(|matched| {
+                        matched.ok().map(|matched| (matched.start(), matched.end()))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            result
+        },
+    )
+}
+
+#[cfg(test)]
+mod product_tests {
+    use super::*;
+    #[test]
+    fn optional_text_features_keep_protected_content_and_prose() {
+        let values = Config {
+            spoken_commands: true,
+            format_numbers: true,
+            remove_restarts: true,
+            capitalize_after_filler: true,
+            ..Config::default()
+        };
+        assert_eq!(process("new line.", &values).unwrap(), "\n");
+        assert_eq!(process("comma.", &values).unwrap(), ",");
+        assert_eq!(process("question mark.", &values).unwrap(), "?");
+        for literal in [
+            "`lower.case`",
+            "\"don't change me.\"",
+            "https://example.com",
+        ] {
+            assert_eq!(
+                process(&format!("um, {literal}"), &values).unwrap(),
+                literal
+            );
+        }
+        assert_eq!(
+            process("um, twenty five dollars comma, please", &values).unwrap(),
+            "$25, please"
+        );
+        assert_eq!(
+            process(
+                "um, send it to `twenty five dollars` via https://example.com/comma",
+                &values
+            )
+            .unwrap(),
+            "Send it to `twenty five dollars` via https://example.com/comma"
+        );
+        assert_eq!(
+            process("One of the things. No one knows.", &values).unwrap(),
+            "One of the things. No one knows."
+        );
+    }
+    #[test]
+    fn confidence_only_permits_low_confidence_unambiguous_words() {
+        let values = Config {
+            prompt: "Sinead".into(),
+            fuzzy_vocabulary: true,
+            confidence_filtering: true,
+            ..Config::default()
+        };
+        let mut word = crate::backend::WordConfidence {
+            text: "Shunade".into(),
+            start_seconds: 0.0,
+            end_seconds: 0.5,
+            min_log_probability: -0.1,
+            duration_is_reliable: false,
+        };
+        assert_eq!(
+            process_with_confidence("Shunade", &values, &[word.clone()]).unwrap(),
+            "Shunade"
+        );
+        word.min_log_probability = -2.0;
+        assert_eq!(
+            process_with_confidence("Shunade Shunade", &values, std::slice::from_ref(&word))
+                .unwrap(),
+            "Shunade Shunade"
+        );
+        assert_eq!(
+            process_with_confidence("Shunade", &values, &[word]).unwrap(),
+            "Sinead"
+        );
+        assert_eq!(process("Shunade", &values).unwrap(), "Shunade");
+    }
 }

@@ -1,0 +1,11 @@
+{
+  "type": "ground_truth_hotword_sanity",
+  "errors": {
+    "greedy": 15,
+    "boosted": 29
+  },
+  "reference_words": 120,
+  "passed": false,
+  "zero_error_baseline": false,
+  "requirement": "Boosting reduces aggregate raw Whisper errors, or preserves an already perfect baseline"
+}
