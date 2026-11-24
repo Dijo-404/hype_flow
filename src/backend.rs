@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::process::{CHILD_GRACE, ChildGroup, nonblocking, run_command_until, wait_for_io};
-use crate::segments::split_at_pauses_with_limit;
+use crate::segments::{ctc_preroll, split_at_pauses_with_limit};
 use crate::setup::{model_files, variant_for_path};
 use crate::vocabulary::hotwords;
 use anyhow::{Context, Result, bail, ensure};
@@ -344,6 +344,10 @@ impl Engine {
         }
     }
 
+    pub(crate) fn normalizes_ctc_preroll(&self) -> bool {
+        self.config.cut_silence && variant_for_path(Path::new(&self.config.model)) == "parakeet-ctc"
+    }
+
     pub fn prepare(&self) {
         let epoch = self.epoch.load(Ordering::SeqCst);
         if epoch & 1 != 0 {
@@ -551,6 +555,12 @@ impl Engine {
                 ..Default::default()
             });
         }
+        let audio_seconds = pcm.len() as f64 / (RATE * 2) as f64;
+        let (pcm, source_offset) = if self.normalizes_ctc_preroll() {
+            ctc_preroll(pcm)
+        } else {
+            (pcm.into(), 0)
+        };
         let cancelled = || self.cancelled(epoch) || external_cancelled();
         let mut worker = self.worker.lock().unwrap();
         ensure!(!cancelled(), "Speech inference cancelled");
@@ -560,8 +570,9 @@ impl Engine {
             .context("Speech backend is not running")?;
         let result = (|| {
             let mut transcript = Transcription::default();
-            let mut audio_offset = 0.0;
-            for segment in split_at_pauses_with_limit(pcm, self.config.max_piece_seconds as usize) {
+            let mut audio_offset = source_offset as f64 / (RATE * 2) as f64;
+            for segment in split_at_pauses_with_limit(&pcm, self.config.max_piece_seconds as usize)
+            {
                 let segment_offset = audio_offset;
                 audio_offset += segment.len() as f64 / (RATE * 2) as f64;
                 if !segment.iter().any(|byte| *byte != 0) {
@@ -572,12 +583,17 @@ impl Engine {
                 active.write(&header, deadline, &cancelled)?;
                 active.write(segment, deadline, &cancelled)?;
                 let response = active.response(deadline, &cancelled)?;
-                transcript.append(
-                    transcription(&response, segment.len() as f64 / (RATE * 2) as f64)?,
-                    segment_offset,
-                );
+                let mut decoded =
+                    transcription(&response, segment.len() as f64 / (RATE * 2) as f64)?;
+                if segment_offset < 0.0 {
+                    for word in &mut decoded.words {
+                        word.start_seconds = word.start_seconds.max(-segment_offset);
+                        word.end_seconds = word.end_seconds.max(-segment_offset);
+                    }
+                }
+                transcript.append(decoded, segment_offset);
             }
-            transcript.audio_seconds = pcm.len() as f64 / (RATE * 2) as f64;
+            transcript.audio_seconds = audio_seconds;
             ensure!(!cancelled(), "Speech inference cancelled");
             Ok(transcript)
         })();

@@ -719,11 +719,10 @@ summary formats are documented in [eval-results/README.md](eval-results/README.m
 
 ### Remaining work
 
-- **A2, A8.** CTC now preserves the original pauses within each bounded decode
-  and passes both original interior-silence word comparisons. One original
-  leading-silence comparison still changes a word. Some public variants still
-  differ in words, case, or punctuation. CTC matches 36 of 40 checkpoint
-  phrases in order across the three long fixtures.
+- **A2, A8.** CTC preserves interior pauses and uses a fixed 32 ms digital
+  lead-in with silence cutting enabled. Other silence variants can still
+  differ in words, case, or punctuation. The remaining comparisons and
+  long-form scores are tracked in [CTC pause preservation](implementation-status.md#ctc-pause-preservation).
 - **Step 0, A1, A3, A5–A7, A9, L3.** Personal and jargon accuracy are still
   open after the public-only pass. Larger paired runs on the default model
   are needed to tune quiet-input gain, VAD, denoising, and thread count.

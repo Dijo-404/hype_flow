@@ -248,6 +248,48 @@ while (payload := read_pcm()) is not None:
 }
 
 #[test]
+fn ctc_normalizes_leading_silence_before_splitting_and_keeps_source_time() {
+    let script = format!(
+        "{WORKER_SETUP}\n{}",
+        r#"
+assert '--ctc' in sys.argv and '--vad' in sys.argv
+send({'ready': True})
+assert read_pcm() == bytes(1024) + b'\x00\x01' * 239488
+send({'text': 'speech', 'tokens': [' speech'], 'timestamps': [0.25],
+      'durations': [0.5], 'ys_log_probs': [-0.1]})
+assert read_pcm() == bytes(1024) + b'\x00\x01' * 239488
+send({'text': 'speech', 'tokens': [' speech'], 'timestamps': [0.01],
+      'durations': [0.5], 'ys_log_probs': [-0.1]})
+assert read_pcm() is None
+"#
+    );
+    let (temp, mut config) = fake_config(&script);
+    let model = temp.path().join("parakeet-110m-ctc-en-int8");
+    fs::create_dir(&model).unwrap();
+    for path in [
+        model.join("model.int8.onnx"),
+        model.join("tokens.txt"),
+        temp.path().join("silero_vad.onnx"),
+    ] {
+        fs::write(path, b"fixture").unwrap();
+    }
+    config.model = model.to_string_lossy().into_owned();
+    config.cut_silence = true;
+    let engine = Engine::new(config, temp.path().to_owned());
+    engine.ensure().unwrap();
+    let mut pcm = vec![0; 3 * RATE * 2];
+    pcm.extend([0, 1].repeat(239_488));
+    let transcript = engine.transcribe_detailed(&pcm).unwrap();
+    assert_eq!(transcript.text, "speech");
+    assert!((transcript.audio_seconds - 17.968).abs() < 1e-9);
+    assert!((transcript.words[0].start_seconds - 3.218).abs() < 1e-9);
+    let unpadded = engine.transcribe_detailed(&pcm[3 * RATE * 2..]).unwrap();
+    assert_eq!(unpadded.text, transcript.text);
+    assert!((unpadded.audio_seconds - 14.968).abs() < 1e-9);
+    assert_eq!(unpadded.words[0].start_seconds, 0.0);
+}
+
+#[test]
 fn worker_flags_use_private_vocabulary_and_remove_it_on_stop() {
     let script = format!(
         "{WORKER_SETUP}\n{}",

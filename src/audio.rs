@@ -64,6 +64,12 @@ pub fn sources() -> Vec<(String, String)> {
     found
 }
 
+struct PieceQueue {
+    sender: mpsc::SyncSender<Vec<u8>>,
+    maximum_seconds: usize,
+    ctc: bool,
+}
+
 struct Session {
     pcm: VecDeque<u8>,
     started: Instant,
@@ -74,7 +80,7 @@ struct Session {
     squares: u64,
     on_frame: FrameCallback,
     on_end: EndCallback,
-    pieces: Option<(mpsc::SyncSender<Vec<u8>>, usize)>,
+    pieces: Option<PieceQueue>,
     spool: Option<File>,
     spool_failure: Option<String>,
 }
@@ -118,11 +124,15 @@ impl Session {
         let overflow = (self.pcm.len() + accepted).saturating_sub(PCM_LIMIT);
         self.pcm.drain(..overflow);
         self.pcm.extend(data);
-        if let Some((sender, maximum)) = &self.pieces
-            && let Some(cut) = crate::segments::eager_cut(self.pcm.make_contiguous(), *maximum)
+        if let Some(queue) = &self.pieces
+            && let Some(cut) = crate::segments::eager_cut(
+                self.pcm.make_contiguous(),
+                queue.maximum_seconds,
+                queue.ctc,
+            )
         {
             let piece = self.pcm.range(..cut).copied().collect();
-            if sender.try_send(piece).is_ok() {
+            if queue.sender.try_send(piece).is_ok() {
                 self.pcm.drain(..cut);
             }
         }
@@ -495,11 +505,14 @@ impl Recorder {
         spool: Option<&Path>,
     ) -> Result<Self> {
         let epoch = engine.recording_epoch();
-        // At least five seconds per piece and a 300-second recording cap bound
-        // this queue below 64 entries without blocking the capture thread.
+        // Keep capture nonblocking. A full queue leaves the PCM in the recorder.
         let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(64);
         let mut session = Session::new(Arc::new(on_frame), Arc::new(on_end));
-        session.pieces = Some((sender, maximum_seconds));
+        session.pieces = Some(PieceQueue {
+            sender,
+            maximum_seconds,
+            ctc: engine.normalizes_ctc_preroll(),
+        });
         session.spool = spool
             .map(|path| {
                 OpenOptions::new()

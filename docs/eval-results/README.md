@@ -116,6 +116,10 @@ runs on the same host. A paired 70-clip check with three repeats had one
 additional word error and a 12 ms higher p95 for pause preservation. Decoder
 latency includes cleanup and excludes clipboard delivery.
 
+The [CTC preroll result](public-parakeet-ctc-preroll.json) uses the same
+manifest and worker. It scored 8.06% Whisper WER at 256 ms p95 and 474 MB peak
+worker RSS after normalizing digital leading silence.
+
 With CTC installed, reproduce its configuration from the pinned Unified baseline:
 
 ```sh

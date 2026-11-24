@@ -210,10 +210,8 @@ and [reference comparison](reference-comparison.md#remaining-work).
 
 Worker revision 8 keeps the original PCM between VAD speech ranges in each
 bounded CTC decode. It still trims leading and trailing silence and returns
-empty text when VAD finds no speech. The two original interior-silence word
-comparisons now pass. One leading-silence word comparison and five case or
-punctuation comparisons remain open. The long fixtures still pass 36 of 40
-exact checkpoint phrases in order.
+empty text when VAD finds no speech. The worker update fixed both original
+interior-silence word comparisons.
 
 On 56 variants of 14 additional public clips, word mismatches fell from
 eight to five. Interior-silence word mismatches fell from five to two.
@@ -224,6 +222,32 @@ Peak worker RSS was 477 MB. The separate full runs measured 276 ms and 260 ms
 at p95. The paired 70-clip test measured 238 ms and 250 ms at p95 and
 one additional word error. These measurements show a small runtime trade-off
 across the samples. [Updated public scores](eval-results/public-parakeet-ctc-pauses.json).
+
+Hype Flow now normalizes the leading all-zero PCM to one 32 ms Silero VAD
+window before splitting CTC audio. The eager capture path accounts for the
+same lead-in when choosing cuts. Word timestamps and duration use the
+original recording timeline, and recovery still keeps the original PCM.
+
+All 17 public leading-silence comparisons matched exactly with denoising
+off and again with it on. With denoising off, all 12 word comparisons in
+the original fixture set pass. Four still differ in case or punctuation.
+The expanded set of 56 comparisons has seven word differences, up from
+five before preroll normalization, and 13 format-only differences, down
+from 30. With denoising on, one original interior-pause comparison and
+eight expanded comparisons still differ in words. The long-form fixtures
+still match 36 of 40 checkpoint phrases in order.
+
+In an isolated niri session, the release pasted the expected words from a
+37.5-second paced clip with three seconds of leading silence. The measured
+run took 544 ms from end of capture to paste after warm-up.
+
+The same 1,400 public clips produced 8.06% Whisper WER after preroll
+normalization, up from 8.03%. Decode and cleanup took 256 ms at p95, and
+peak worker RSS was 474 MB. [Public preroll scores](eval-results/public-parakeet-ctc-preroll.json).
+
+The live Wayland app reached Ready after switching to CTC. The installed
+recognizer passed the three original leading-silence checks with the saved
+denoising setting enabled.
 
 ## Follow-through against both plans
 

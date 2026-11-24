@@ -10,6 +10,8 @@ On first use, open **Speech model** and choose **Install selected model**. Setup
 
 CTC worker revision 8 preserves the original pauses within each decode piece. After updating Hype Flow, refresh an older CTC worker through **Speech model** by installing the CTC profile again. Setup reuses a verified cached archive when available.
 
+With silence cutting enabled, Parakeet CTC uses a fixed 32 ms digital lead-in before decoding. This keeps added all-zero audio from shifting the decode boundaries. Dictation duration and word timestamps still refer to the original recording.
+
 Choose **Configure niri** under **Shortcuts** to add bindings and autostart. The app validates the resulting configuration and saves a backup. The `hype_niri` branch includes these bindings directly. Existing display settings at `Super + Shift + D` remain available.
 
 Click the current **Dictate** or **Cancel** shortcut under **Shortcuts**, then press the key combination you want, such as `Alt+Space`. Press Escape or click away to cancel capture. Choose **Save changes** to apply the new shortcut. Existing preferences keep the original shortcuts until edited. Changes validate the complete niri configuration, reject conflicts, and back up both the configuration and the managed bindings.
