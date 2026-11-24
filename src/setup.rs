@@ -46,7 +46,7 @@ pub struct ModelSpec {
     pub feature_dim: u32,
     pub boosting: bool,
     files: &'static [&'static str],
-    label: &'static str,
+    pub(crate) label: &'static str,
     archive: &'static str,
     sha256: &'static str,
 }

@@ -104,7 +104,7 @@ with open(os.environ["HYPE_TEST_PID_FILE"], "a") as log:
 while True:
     sys.stdout.buffer.write(bytes([1, 0]) * 800)
     sys.stdout.buffer.flush()
-    time.sleep(0.05)
+    time.sleep(1 if os.path.exists(os.environ["HYPE_TEST_SHORT_CAPTURE"]) else 0.05)
 ''')
         write_executable(fake / "pw-dump", "#!/bin/sh\nprintf '[]'\n")
         write_executable(fake / "niri", "#!" + sys.executable + "\n" + r'''
@@ -118,6 +118,8 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
         niri_config.parent.mkdir(parents=True)
         niri_config.write_text('input { keyboard { xkb { layout "us"; }; }; }\n')
         env = {**os.environ, "XDG_DATA_HOME": str(root / "data"), "XDG_CONFIG_HOME": str(root / "config"), "XDG_STATE_HOME": str(root / "state"), "NIRI_CONFIG": str(niri_config), "PATH": str(fake) + ":" + os.environ["PATH"], "HYPE_TEST_PID_FILE": str(root / "capture-pids"), "HYPE_TEST_DELAY": str(root / "focus-delay")}
+        short_capture = root / "short-capture"
+        env["HYPE_TEST_SHORT_CAPTURE"] = str(short_capture)
         log = (root / "app.log").open("wb")
         app = subprocess.Popen([executable, "--background"], env=env, stdout=log, stderr=log, start_new_session=True)
         group = Gio.DBusActionGroup.get(Gio.bus_get_sync(Gio.BusType.SESSION, None), "dev.hype.Flow", "/dev/hype/Flow")
@@ -141,6 +143,17 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             wait(lambda: group.has_action("toggle") and phase("idle"), "ready actions")
             for name in ("toggle", "cancel", "show", "copy-last", "copy-raw", "quit"):
                 assert group.has_action(name), name
+            short_capture.touch()
+            group.activate_action("toggle", None)
+            wait(lambda: phase("recording"), "short recording starts")
+            group.activate_action("toggle", None)
+            wait(lambda: phase("done"), "short recording rejected")
+            assert "Recording too short" in state()[1], state()
+            short_capture.unlink()
+            group.activate_action("toggle", None)
+            wait(lambda: phase("recording"), "single shortcut starts again after a short recording", timeout=4)
+            group.activate_action("cancel", None)
+            wait(lambda: phase("idle"), "cancel retried recording")
             group.activate_action("shortcuts", None)
             wait(lambda: niri_config.with_name("hype-flow.kdl").exists(), "custom shortcut installation")
             bindings = niri_config.with_name("hype-flow.kdl").read_text()
@@ -213,8 +226,24 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             assert text() == "OpenAI hello.", "Cancelled decode pasted late text"
             subprocess.run([executable, "--cancel"], env=env, check=True, timeout=5)
             subprocess.run([executable], env=env, check=True, timeout=5)
-            wait(lambda: any(item.get("app_id") == "dev.hype.Flow" and item.get("pid") == app.pid for item in json.loads(subprocess.check_output(["niri", "msg", "--json", "windows"]))), "launcher settings window")
-            group.activate_action("quit", None)
+            def settings_focused():
+                current = focused()
+                return current and current["app_id"] == "dev.hype.Flow" and current["pid"] == app.pid
+
+            def keys(*args):
+                subprocess.run(["wtype", *args], check=True, timeout=5)
+
+            wait(settings_focused, "launcher settings window")
+            for key in ("w", "q"):
+                keys("-M", "ctrl", "-M", "shift", "-k", key, "-m", "shift", "-m", "ctrl")
+                time.sleep(0.15)
+                assert settings_focused() and app.poll() is None, f"Ctrl+Shift+{key.upper()} closed settings"
+            keys("-M", "ctrl", "-k", "w", "-m", "ctrl")
+            wait(lambda: not any(item.get("pid") == app.pid for item in json.loads(subprocess.check_output(["niri", "msg", "--json", "windows"]))), "Ctrl+W hides settings")
+            assert app.poll() is None
+            subprocess.run([executable], env=env, check=True, timeout=5)
+            wait(settings_focused, "launcher reopens settings in the same process")
+            keys("-M", "ctrl", "-k", "q", "-m", "ctrl")
             app.wait(timeout=8)
             assert app.returncode == 0
             assert not raw.exists() and not cleaned.exists(), "Transcript not removed at exit"

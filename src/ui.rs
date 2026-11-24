@@ -223,6 +223,8 @@ pub struct Home {
     pub download_button: gtk::Button,
     values: RefCell<Config>,
     model_status: gtk::Label,
+    model_ready: Cell<bool>,
+    downloading: Cell<bool>,
     status_dot: gtk::Box,
     sidebar: gtk::Box,
     navigation_labels: Vec<gtk::Label>,
@@ -408,20 +410,21 @@ impl Home {
         let microphones = section(&pages[0], "Microphone");
         let feedback = section(&pages[0], "Feedback");
         let transcription = section(&pages[1], "Transcription");
-        transcription.append(&label("Offline English speech models", "model-title"));
-        transcription.append(&label("Unified favors accuracy. The 110M model uses less memory and may make more errors. Audio stays on this device.", "muted"));
-        let model_status = label("Checking model…", "muted");
-        transcription.append(&model_status);
+        let model_summary = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        model_summary.add_css_class("panel-body");
+        let model_status = label("Checking speech model…", "model-title");
+        model_summary.append(&model_status);
+        model_summary.append(&label(
+            "English dictation runs entirely on this device.",
+            "muted",
+        ));
+        transcription.append(&model_summary);
         let download_button = gtk::Button::with_label("Install selected model");
-        download_button.add_css_class("primary");
-        download_button.set_halign(gtk::Align::Start);
-        download_button.set_margin_start(14);
-        download_button.set_margin_bottom(14);
+        download_button.set_halign(gtk::Align::End);
         {
             let action = action.clone();
             download_button.connect_clicked(move |_| action("download"));
         }
-        transcription.append(&download_button);
         let processing = section(&pages[1], "Audio processing");
         let memory = section(&pages[1], "Memory");
         let vocabulary = section(&pages[2], "Custom vocabulary");
@@ -458,7 +461,7 @@ impl Home {
             (
                 "keep_mic_ready",
                 "Keep microphone ready",
-                "Holds the microphone for 30 seconds and keeps half a second before your shortcut.",
+                "Keeps the microphone open for 30 seconds after dictation, including half a second before your next shortcut.",
                 &microphones,
             ),
             (
@@ -573,8 +576,7 @@ impl Home {
             let switch = gtk::Switch::builder()
                 .active(json[key].as_bool().unwrap_or(false))
                 .build();
-            let item = row(group, title, detail, &switch);
-            rows.push((item, switch.clone().upcast()));
+            row(group, title, detail, &switch);
             controls.push((key.to_string(), Control::Switch(switch)));
         }
         let mut sources = vec![("auto".to_string(), "System default".to_string())];
@@ -588,8 +590,8 @@ impl Home {
         for (key, title, detail, choices, group) in [
             (
                 "model_variant",
-                "Model to download",
-                "Save this choice, then download. Your active model stays in use until the download finishes.",
+                "Model to install",
+                "The active model stays in use until installation finishes.",
                 vec![
                     ("unified".into(), "Unified English INT8 · 663 MB".into()),
                     (
@@ -598,7 +600,7 @@ impl Home {
                     ),
                     (
                         "parakeet-ctc".into(),
-                        "Parakeet 110M CTC INT8 · 131.7 MB (default)".into(),
+                        "Parakeet 110M CTC INT8 · 131.7 MB".into(),
                     ),
                 ],
                 &transcription,
@@ -666,18 +668,23 @@ impl Home {
                 Control::Choice(dropdown, choices.into_iter().map(|(id, _)| id).collect()),
             ));
         }
+        let model_actions = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        model_actions.add_css_class("panel-body");
+        model_actions.append(&download_button);
+        transcription.append(&model_actions);
         let prompt = gtk::Entry::builder()
             .text(&values.prompt)
             .placeholder_text("niri, Hype Flow, project names…")
             .hexpand(true)
             .build();
-        let item = row(
-            &vocabulary,
-            "Names and specialist terms",
-            "Separate names with commas or new lines; at most 100 entries.",
-            &prompt,
-        );
-        rows.push((item, prompt.clone().upcast()));
+        let vocabulary_body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        vocabulary_body.add_css_class("panel-body");
+        let prompt_title = "Names and specialist terms";
+        vocabulary_body.append(&label(prompt_title, "row-title"));
+        vocabulary_body.append(&label("Separate up to 100 entries with commas.", "muted"));
+        prompt.update_property(&[gtk::accessible::Property::Label(prompt_title)]);
+        vocabulary_body.append(&prompt);
+        vocabulary.prepend(&vocabulary_body);
         controls.push(("prompt".into(), Control::Entry(prompt)));
         for (key, title, detail, minimum, maximum, step, group) in [
             (
@@ -702,8 +709,7 @@ impl Home {
             let spin = gtk::SpinButton::with_range(minimum, maximum, step);
             spin.set_digits(if key == "boost_score" { 1 } else { 2 });
             spin.set_value(json[key].as_f64().unwrap_or(minimum));
-            let item = row(group, title, detail, &spin);
-            rows.push((item, spin.clone().upcast()));
+            row(group, title, detail, &spin);
             controls.push((key.to_string(), Control::Number(spin)));
         }
         for (key, title, detail, group) in [
@@ -745,37 +751,43 @@ impl Home {
             controls.push((key.to_string(), Control::Text(editor.buffer())));
         }
         let transcript = section(&pages[0], "Last transcript");
-        for (title, detail, name) in [
+        for (title, detail, button_label, name) in [
             (
-                "Copy transcript",
+                "Cleaned transcript",
                 "Recover the last dictation for this session.",
+                "Copy transcript",
                 "copy-last",
             ),
             (
-                "Copy original",
+                "Original transcript",
                 "Recognizer output before corrections and filtering.",
+                "Copy original",
                 "copy-raw",
             ),
             (
-                "Retry last failed",
+                "Failed recording",
                 "Re-transcribe the latest failed or interrupted recording; copied for review.",
+                "Retry last failed",
                 "retry-last",
             ),
             (
-                "Retry recent recording",
+                "Recent recording",
                 "Re-transcribe the latest retained successful recording; copied for review.",
+                "Retry recent recording",
                 "retry-history",
             ),
             (
-                "Delete saved recordings",
+                "Saved recordings",
                 "Delete retained recovery and history audio. Disabling retention does not delete existing files.",
+                "Delete saved recordings",
                 "clear-recordings",
             ),
         ] {
-            let button = gtk::Button::with_label(title);
+            let button = gtk::Button::with_label(button_label);
             let action = action.clone();
             button.connect_clicked(move |_| action(name));
             row(&transcript, title, detail, &button);
+            button.update_property(&[gtk::accessible::Property::Label(button_label)]);
         }
         pages[0].append(&label(
             "Use your Dictate shortcut to start. Press again to finish. Edit bindings in Shortcuts.",
@@ -798,9 +810,8 @@ impl Home {
             ),
         ] {
             let capture = ShortcutCapture::new(title, value);
-            let item = row(&shortcuts, title, detail, &capture.button);
+            row(&shortcuts, title, detail, &capture.button);
             capture.cancel();
-            rows.push((item, capture.button.clone().upcast()));
             controls.push((key.into(), Control::Shortcut(capture)));
         }
         pages[4].append(&label("Click a shortcut, then press the keys you want. Escape cancels. Use Save changes to apply; existing bindings are checked first.", "muted"));
@@ -816,7 +827,7 @@ impl Home {
             "Validates settings and saves a backup before applying.",
             &configure,
         );
-        pages[4].append(&label("The notch shows microphone levels. Click its capsule to finish, or right-click to cancel.", "muted"));
+        pages[4].append(&label("The dictation capsule shows microphone levels. Click it to finish, or right-click to cancel.", "muted"));
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         footer.add_css_class("settings-footer");
         let status = label("Ready", "muted");
@@ -839,6 +850,8 @@ impl Home {
             download_button,
             values: RefCell::new(values.clone()),
             model_status,
+            model_ready: Cell::new(false),
+            downloading: Cell::new(false),
             status_dot,
             sidebar,
             navigation_labels,
@@ -863,8 +876,19 @@ impl Home {
                 home.save_button.set_label("Save changes");
             }
         });
-        for (_, control) in &home.controls {
-            control.connect_changed(dirty.clone());
+        for (key, control) in &home.controls {
+            let dirty = dirty.clone();
+            if key == "model_variant" {
+                let weak = Rc::downgrade(&home);
+                control.connect_changed(Rc::new(move || {
+                    dirty();
+                    if let Some(home) = weak.upgrade() {
+                        home.update_download_button();
+                    }
+                }));
+            } else {
+                control.connect_changed(dirty);
+            }
         }
         let weak = Rc::downgrade(&home);
         home.save_button.connect_clicked(move |_| {
@@ -892,7 +916,9 @@ impl Home {
                     }
                 }
             }
-            if modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+            if modifiers.intersection(gtk::accelerator_get_default_mod_mask())
+                == gdk::ModifierType::CONTROL_MASK
+            {
                 if key == gdk::Key::w || key == gdk::Key::W {
                     if let Some(home) = weak.upgrade() {
                         home.window.set_visible(false);
@@ -931,6 +957,7 @@ impl Home {
         });
         home.navigation
             .select_row(home.navigation.row_at_index(0).as_ref());
+        home.update_boosting_controls();
         home
     }
 
@@ -965,6 +992,11 @@ impl Home {
         }
         self.sidebar
             .set_size_request(if compact { 64 } else { 200 }, -1);
+        self.download_button.set_halign(if compact {
+            gtk::Align::Start
+        } else {
+            gtk::Align::End
+        });
         for label in &self.navigation_labels {
             label.set_visible(!compact);
         }
@@ -983,7 +1015,14 @@ impl Home {
     }
 
     pub fn saved(self: &Rc<Self>, values: Config) {
-        *self.values.borrow_mut() = values;
+        *self.values.borrow_mut() = values.clone();
+        self.update_boosting_controls();
+        self.update_download_button();
+        if !self.changes().is_ok_and(|draft| draft == values) {
+            self.save_button.set_sensitive(true);
+            self.save_button.set_label("Save changes");
+            return;
+        }
         self.save_button.set_sensitive(false);
         self.save_button.set_label("Saved");
         let weak = Rc::downgrade(self);
@@ -1002,28 +1041,74 @@ impl Home {
     }
 
     pub fn set_downloading(&self, downloading: bool) {
-        self.download_button.set_sensitive(!downloading);
+        self.downloading.set(downloading);
+        self.update_download_button();
+    }
+
+    fn update_boosting_controls(&self) {
+        let supported =
+            setup::variant_for_path(std::path::Path::new(&self.values.borrow().model)) == "unified";
+        for (key, control) in &self.controls {
+            match (key.as_str(), control) {
+                ("vocabulary_boosting", Control::Switch(switch)) => {
+                    if !supported {
+                        switch.set_active(false);
+                    }
+                    switch.set_sensitive(supported);
+                }
+                ("boost_score", Control::Number(spin)) => spin.set_sensitive(supported),
+                _ => {}
+            }
+        }
+    }
+
+    fn update_download_button(&self) {
+        let values = self.values.borrow();
+        let saved_choice = self.controls.iter().any(|(key, control)| {
+            key == "model_variant" && control.value().as_str() == Some(&values.model_variant)
+        });
+        let reinstall = self.model_ready.get()
+            && setup::model_spec(&values.model_variant).is_ok_and(|spec| {
+                crate::config::data_dir().join("models").join(spec.name)
+                    == std::path::Path::new(&values.model)
+            });
+        let downloading = self.downloading.get();
+        self.download_button
+            .set_sensitive(saved_choice && !downloading);
+        if saved_choice && !reinstall {
+            self.download_button.add_css_class("primary");
+        } else {
+            self.download_button.remove_css_class("primary");
+        }
         self.download_button.set_label(if downloading {
             "Installing…"
+        } else if !saved_choice {
+            "Save model choice to install"
+        } else if reinstall {
+            "Reinstall model"
         } else {
-            "Install selected model"
+            "Install model"
         });
     }
 
     pub fn update(&self, state: &str, message: &str, ready: bool) {
         self.feedback(message);
-        self.download_button.set_visible(true);
+        self.model_ready.set(ready);
+        self.update_download_button();
         let model = std::path::Path::new(&self.values.borrow().model).to_path_buf();
-        let installed = setup::MODEL_FILES
+        let installed = setup::model_files(&model)
             .iter()
             .all(|name| model.join(name).is_file());
-        self.model_status.set_label(if ready {
-            "Installed on this device"
+        let model_status = if ready {
+            let spec =
+                setup::model_spec(setup::variant_for_path(&model)).expect("known model variant");
+            format!("Active model · {}", spec.label)
         } else if installed {
-            "Update speech support to enable all features."
+            "Speech support needs an update".to_owned()
         } else {
-            "Download the model to start dictating."
-        });
+            "No speech model installed".to_owned()
+        };
+        self.model_status.set_label(&model_status);
         self.badge.set_label(match state {
             "loading" => "Loading",
             "starting" => "Starting",
@@ -1031,6 +1116,7 @@ impl Home {
             "transcribing" => "Transcribing",
             "delivering" => "Copying",
             "error" => "Needs attention",
+            _ if !ready => "Setup required",
             _ => "On-device",
         });
         for tone in ["ok", "busy", "error"] {

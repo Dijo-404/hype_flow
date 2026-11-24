@@ -34,7 +34,6 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     let saved_copy = saved.clone();
     let actions_copy = actions.clone();
     let values = Config {
-        model: "/test/old-model".into(),
         server: "/test/old-worker".into(),
         threads: 3,
         ..Config::default()
@@ -48,6 +47,19 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
             true
         }),
     );
+    home.update("idle", "Ready", true);
+    assert_eq!(
+        home.download_button.label().as_deref(),
+        Some("Reinstall model")
+    );
+    let captures = std::env::var_os("HYPE_FLOW_UI_CAPTURE_DIR").map(|directory| {
+        gtk::Settings::default()
+            .unwrap()
+            .set_gtk_enable_animations(false);
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        (directory, gtk::WidgetPaintable::new(Some(&home.window)))
+    });
     home.window.present();
     settle();
     for (index, (name, _, _)) in PAGES.iter().enumerate() {
@@ -55,11 +67,9 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
             .select_row(home.navigation.row_at_index(index as i32).as_ref());
         settle();
         assert_eq!(home.stack.visible_child_name().as_deref(), Some(*name));
-        if let Some(directory) = std::env::var_os("HYPE_FLOW_UI_CAPTURE_DIR") {
-            let directory = std::path::PathBuf::from(directory);
-            std::fs::create_dir_all(&directory).unwrap();
+        if let Some((directory, paintable)) = &captures {
             let snapshot = gtk::Snapshot::new();
-            gtk::WidgetPaintable::new(Some(&home.window)).snapshot(
+            paintable.snapshot(
                 &snapshot,
                 f64::from(home.window.width()),
                 f64::from(home.window.height()),
@@ -136,13 +146,18 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
         match (key.as_str(), control) {
             ("prompt", Control::Entry(entry)) => entry.set_text("नमस्ते, niri"),
             ("paste", Control::Switch(switch)) => switch.set_active(false),
-            ("boost_score", Control::Number(spin)) => spin.set_value(2.0),
+            ("vocabulary_boosting", Control::Switch(switch)) => assert!(!switch.is_sensitive()),
+            ("boost_score", Control::Number(spin)) => {
+                assert!(!spin.is_sensitive());
+                spin.set_value(2.0);
+            }
             ("model_variant", Control::Choice(dropdown, _)) => dropdown.set_selected(1),
             ("corrections", Control::Text(buffer)) => buffer.set_text("open ai => OpenAI"),
             _ => {}
         }
     }
     assert!(home.save_button.is_sensitive());
+    assert!(!home.download_button.is_sensitive());
     home.save_button.emit_clicked();
     let config = saved.borrow()[0].clone();
     assert_eq!(config.prompt, "नमस्ते, niri");
@@ -156,6 +171,15 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     assert_eq!(config.feature_dim, values.feature_dim);
     assert_eq!(config.threads, 3);
     assert!(!home.save_button.is_sensitive());
+    assert!(home.download_button.is_sensitive());
+    assert_eq!(
+        home.download_button.label().as_deref(),
+        Some("Install model")
+    );
+    home.set_downloading(true);
+    assert!(!home.download_button.is_sensitive());
+    home.set_downloading(false);
+    assert!(home.download_button.is_sensitive());
     for (key, control) in &home.controls {
         if key == "corrections"
             && let Control::Text(buffer) = control

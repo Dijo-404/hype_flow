@@ -27,12 +27,10 @@ use std::{
 
 type Transcript = (String, String, Option<String>, bool);
 const MIN_RECORDING_BYTES: usize = crate::backend::RATE * 2 * 3 / 10;
+const SHORT_RECORDING: &str = "Recording too short (minimum 300 ms)";
 
 fn validate_recording_length(bytes: usize) -> Result<()> {
-    anyhow::ensure!(
-        bytes >= MIN_RECORDING_BYTES,
-        "Recording too short (minimum 300 ms)"
-    );
+    anyhow::ensure!(bytes >= MIN_RECORDING_BYTES, "{SHORT_RECORDING}");
     Ok(())
 }
 
@@ -45,6 +43,7 @@ enum Event {
     Frame(u64, f64, f64),
     CaptureEnded(u64),
     CaptureStopped(u64),
+    ShortRecording(u64),
     Transcribed(u64, Result<Transcript>),
     Delivered(u64, Result<String>),
     Downloaded(String, Result<(String, String)>),
@@ -450,7 +449,12 @@ impl AppState {
                     recovery::discard(Some(path));
                 }
             }
-            let _ = tx.send_blocking(Event::Transcribed(generation, result));
+            let event = if recording_too_short {
+                Event::ShortRecording(generation)
+            } else {
+                Event::Transcribed(generation, result)
+            };
+            let _ = tx.send_blocking(event);
         }));
     }
 
@@ -684,6 +688,11 @@ impl AppState {
             }
             Event::CaptureStopped(generation) if self.session.current(generation) => {
                 self.media.resume();
+            }
+            Event::ShortRecording(generation) if self.session.current(generation) => {
+                self.media.resume();
+                self.session.busy = false;
+                self.publish("done", SHORT_RECORDING, true, 0.0, 0.0);
             }
             Event::Transcribed(generation, result) if self.session.current(generation) => {
                 self.media.resume();
