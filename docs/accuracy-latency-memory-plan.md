@@ -62,37 +62,37 @@ comes from:
 
 ### Pipeline
 
-| Stage | Implementation | Location |
-|---|---|---|
-| Capture | `pw-record --raw --format s16 --rate 16000 --channels 1 --latency 50ms`. PipeWire resamples. | `src/audio.rs:166-180` |
-| Recording cap | 300 s | `src/backend.rs:19` |
-| Worker | sherpa-onnx **1.13.8** C API, in its own network namespace | `src/setup.rs:23-24`, `worker/src/main.rs` |
-| Model | `parakeet-unified-en-int8`. Encoder 654 MB on disk. | `src/setup.rs:27-31` |
-| Decoding | `greedy_search`. When boosting is on: `modified_beam_search`, `max_active_paths = 4`, `hotwords_score` | `worker/src/main.rs:204-214` |
-| Threads | `min(cpus, 4)` | `src/config.rs:106` |
-| Denoiser | GTCRN, optional, off by default. Runs before VAD. | `worker/src/main.rs:248-266, 300-306` |
-| VAD | Silero: threshold 0.3, min_silence 0.45 s, min_speech 0.06 s, max_speech 30 s, window 512 | `worker/src/main.rs:222-232` |
-| Segment padding | `PAD_BEFORE` 7200 samples (450 ms), `PAD_AFTER` 3200 (200 ms). Segments are joined end to end. | `worker/src/main.rs:20-21, 358-399` |
-| Decode | All kept speech goes into **one** offline stream, decoded once | `worker/src/main.rs:325-342` |
-| Cleanup | Fillers, corrections, blocked words, repetitions, fuzzy vocabulary (soundex + Levenshtein, tolerance 0.18) | `src/cleanup.rs` |
+| Stage               | Implementation                                                                                                  | Location                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Capture             | `pw-record --raw --format s16 --rate 16000 --channels 1 --latency 50ms`. PipeWire resamples.                    | `src/audio.rs:166-180`                                   |
+| Recording cap       | 300 s                                                                                                           | `src/backend.rs:19`                                      |
+| Worker              | sherpa-onnx **1.13.8** C API, in its own network namespace                                                      | `src/setup.rs:23-24`, `worker/src/main.rs`               |
+| Model               | `parakeet-unified-en-int8`. Encoder 654 MB on disk.                                                             | `src/setup.rs:27-31`                                     |
+| Decoding            | `greedy_search`. When boosting is on: `modified_beam_search`, `max_active_paths = 4`, `hotwords_score`          | `worker/src/main.rs:204-214`                             |
+| Threads             | `min(cpus, 4)`                                                                                                  | `src/config.rs:106`                                      |
+| Denoiser            | GTCRN, optional, off by default. Runs before VAD.                                                               | `worker/src/main.rs:248-266, 300-306`                    |
+| VAD                 | Silero: threshold 0.3, min_silence 0.45 s, min_speech 0.06 s, max_speech 30 s, window 512                       | `worker/src/main.rs:222-232`                             |
+| Segment padding     | `PAD_BEFORE` 7200 samples (450 ms), `PAD_AFTER` 3200 (200 ms). Segments are joined end to end.                  | `worker/src/main.rs:20-21, 358-399`                      |
+| Decode              | All kept speech goes into **one** offline stream, decoded once                                                  | `worker/src/main.rs:325-342`                             |
+| Cleanup             | Fillers, corrections, blocked words, repetitions, fuzzy vocabulary (soundex + Levenshtein, tolerance 0.18)      | `src/cleanup.rs`                                         |
 | Vocabulary boosting | Off by default. Score 1.5, allowed 0.5–3.0. Each term adds case variants; terms starting with `:` are rejected. | `src/config.rs:110-111, 181`, `src/vocabulary.rs:96-110` |
-| Delivery | Clipboard, fixed 180 ms wait, focus check, paste key by app, restore after 800 ms only if unchanged | `src/output.rs:42, 213, 336-346` |
-| Idle unload | Default 10 min; choices 0/5/10/15/30/60 | `src/config.rs:15, 124` |
+| Delivery            | Clipboard, fixed 180 ms wait, focus check, paste key by app, restore after 800 ms only if unchanged             | `src/output.rs:42, 213, 336-346`                         |
+| Idle unload         | Default 10 min; choices 0/5/10/15/30/60                                                                         | `src/config.rs:15, 124`                                  |
 
 ### Baseline (measured; medians from `docs/migration-results.md`)
 
-| Metric | Value |
-|---|---:|
-| Model-free process-tree PSS | 28 MB |
-| Loaded process-tree PSS | 1.44 GB |
-| Startup to ready (model loaded) | 4795 ms |
-| Shortcut to first captured frame | 168 ms |
-| End of capture to pasted text | 1171 ms |
-| ├ decode + cleanup | 814 ms |
-| └ delivery | 331 ms |
-| Denoiser cost (earlier probe) | about +0.4 s |
-| Accuracy on the owner's voice | not measured |
-| Accuracy on public data | not measured |
+| Metric                           |        Value |
+| -------------------------------- | -----------: |
+| Model-free process-tree PSS      |        28 MB |
+| Loaded process-tree PSS          |      1.44 GB |
+| Startup to ready (model loaded)  |      4795 ms |
+| Shortcut to first captured frame |       168 ms |
+| End of capture to pasted text    |      1171 ms |
+| ├ decode + cleanup               |       814 ms |
+| └ delivery                       |       331 ms |
+| Denoiser cost (earlier probe)    | about +0.4 s |
+| Accuracy on the owner's voice    | not measured |
+| Accuracy on public data          | not measured |
 
 ### Evaluator today (`src/bin/evaluate.rs`)
 
@@ -113,23 +113,23 @@ comes from:
 
 All repositories were cloned under `/home/dj/tmp-whisper`.
 
-| Project | Commit | What it is | Relevance |
-|---|---|---|---|
-| Sayso | `a7c4d85` | Go + Rust dictation app; sherpa-onnx **1.13.8** on Linux | Closest match to Hype Flow. Public benchmark harness. |
-| Handy | `4807c21a` | Tauri dictation app, transcribe-cpp engines | Model catalog with English WER (FLEURS); filter for output that repeats the vocabulary; 363 Rust tests |
-| OpenWhispr | `2617e0a` | Electron app; local sherpa-onnx/whisper.cpp plus cloud providers | Measured per-model hotword scores; repeat filter; learns corrections from user edits |
-| Voxtype | `4d26c1f` | Rust Wayland dictation daemon | Pure-Rust ITN; DoubleMetaphone vocabulary matching; niri terminal detection |
-| Sussurro | `0c1db47` | Go app, whisper.cpp + llama.cpp | Real-model invariance tests; bounded phonetic correction validator; LLM guards |
-| Vocalinux | `7ad089e` | Python app (whisper.cpp, VOSK, Parakeet) | Before/after performance benchmarks; ~170 pytest files |
-| OpenSuperWhisper | `c8e6fe7` | macOS Swift app | WER regression test; long-form fixtures with checkpoint phrases |
-| NeMo / Speech | `c02239a` | NVIDIA NeMo Speech (both clones are the same repo) | Evaluator design, keyword F-score, boosting sanity test, fine-tuning |
-| sherpa-onnx (main) | `3bf65c5` (v2.0.3) | Inference runtime | Model notes, streaming examples, 2.0.x decoder changes |
-| sherpa-onnx v1.13.8 | `11afbd0` | Version pinned by Hype Flow | Used to confirm runtime behaviour |
-| whisper.cpp | `5eaee0cc` | Inference + tests | Parakeet LibriSpeech eval, golden-transcript tests, Whisper normalizer |
-| faster-whisper | `6cb639e` | Inference + benchmarks | WER/speed/memory benchmarks, hotword test |
-| WhisperX | `8d8e43b` | Alignment | Low relevance: Parakeet already gives timestamps |
-| Silero VAD | `066409f` | VAD model + tuning tools | Threshold grid search |
-| llama.cpp | `44d50873b` | Local LLM runtime | Optional LLM cleanup with GBNF/JSON schema |
+| Project             | Commit             | What it is                                                       | Relevance                                                                                              |
+| ------------------- | ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Sayso               | `a7c4d85`          | Go + Rust dictation app; sherpa-onnx **1.13.8** on Linux         | Closest match to Hype Flow. Public benchmark harness.                                                  |
+| Handy               | `4807c21a`         | Tauri dictation app, transcribe-cpp engines                      | Model catalog with English WER (FLEURS); filter for output that repeats the vocabulary; 363 Rust tests |
+| OpenWhispr          | `2617e0a`          | Electron app; local sherpa-onnx/whisper.cpp plus cloud providers | Measured per-model hotword scores; repeat filter; learns corrections from user edits                   |
+| Voxtype             | `4d26c1f`          | Rust Wayland dictation daemon                                    | Pure-Rust ITN; DoubleMetaphone vocabulary matching; niri terminal detection                            |
+| Sussurro            | `0c1db47`          | Go app, whisper.cpp + llama.cpp                                  | Real-model invariance tests; bounded phonetic correction validator; LLM guards                         |
+| Vocalinux           | `7ad089e`          | Python app (whisper.cpp, VOSK, Parakeet)                         | Before/after performance benchmarks; ~170 pytest files                                                 |
+| OpenSuperWhisper    | `c8e6fe7`          | macOS Swift app                                                  | WER regression test; long-form fixtures with checkpoint phrases                                        |
+| NeMo / Speech       | `c02239a`          | NVIDIA NeMo Speech (both clones are the same repo)               | Evaluator design, keyword F-score, boosting sanity test, fine-tuning                                   |
+| sherpa-onnx (main)  | `3bf65c5` (v2.0.3) | Inference runtime                                                | Model notes, streaming examples, 2.0.x decoder changes                                                 |
+| sherpa-onnx v1.13.8 | `11afbd0`          | Version pinned by Hype Flow                                      | Used to confirm runtime behaviour                                                                      |
+| whisper.cpp         | `5eaee0cc`         | Inference + tests                                                | Parakeet LibriSpeech eval, golden-transcript tests, Whisper normalizer                                 |
+| faster-whisper      | `6cb639e`          | Inference + benchmarks                                           | WER/speed/memory benchmarks, hotword test                                                              |
+| WhisperX            | `8d8e43b`          | Alignment                                                        | Low relevance: Parakeet already gives timestamps                                                       |
+| Silero VAD          | `066409f`          | VAD model + tuning tools                                         | Threshold grid search                                                                                  |
+| llama.cpp           | `44d50873b`        | Local LLM runtime                                                | Optional LLM cleanup with GBNF/JSON schema                                                             |
 
 ## 4. Verified findings
 
@@ -193,13 +193,13 @@ The Python baseline had the same behavior.
 
 Handy `src-tauri/src/catalog/catalog.json`, English, dataset `fleurs`:
 
-| Model | WER |
-|---|---:|
+| Model                    |      WER |
+| ------------------------ | -------: |
 | parakeet-unified-en-0.6b | **3.99** |
-| parakeet-tdt-0.6b-v2 | 4.11 |
-| parakeet-ultra | 4.26 |
-| parakeet-tdt-0.6b-v3 | 4.83 |
-| parakeet-tdt_ctc-110m | 6.11 |
+| parakeet-tdt-0.6b-v2     |     4.11 |
+| parakeet-ultra           |     4.26 |
+| parakeet-tdt-0.6b-v3     |     4.83 |
+| parakeet-tdt_ctc-110m    |     6.11 |
 
 Sayso `docs/benchmark.md`, 1,400 clips across 7 Open ASR sets:
 
@@ -227,17 +227,17 @@ lever. Hype Flow's **int8** build has never been compared with fp32.
 
 ### 4.7 Corrections to earlier drafts of this comparison
 
-| Earlier claim | Correct |
-|---|---|
-| Hype Flow ships v3-int8 and should switch to v2 | It ships unified-en-int8, the best of the lot |
-| Long dictations lose quiet words after 30 s | Only after 30 s with no pause; one forced cut; low risk |
-| Add speech padding | Already done (450/200 ms) |
-| Add terminal paste key, PRIMARY, newer-copy-wins restore | Already done (`src/output.rs`) |
-| Add hotword case variants | Already done (`src/vocabulary.rs:104-109`) |
-| Handy has 6 test files | It has 363 Rust tests |
-| OpenSuperWhisper has 1 test file | It has 22 test files, including a WER regression test |
-| OpenWhispr is mostly cloud | It also runs local sherpa-onnx Parakeet and whisper.cpp |
-| Voxtype's CI checks accuracy with real inference | It is a QEMU check that a baseline-CPU build does not crash (SIGILL) |
+| Earlier claim                                            | Correct                                                              |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| Hype Flow ships v3-int8 and should switch to v2          | It ships unified-en-int8, the best of the lot                        |
+| Long dictations lose quiet words after 30 s              | Only after 30 s with no pause; one forced cut; low risk              |
+| Add speech padding                                       | Already done (450/200 ms)                                            |
+| Add terminal paste key, PRIMARY, newer-copy-wins restore | Already done (`src/output.rs`)                                       |
+| Add hotword case variants                                | Already done (`src/vocabulary.rs:104-109`)                           |
+| Handy has 6 test files                                   | It has 363 Rust tests                                                |
+| OpenSuperWhisper has 1 test file                         | It has 22 test files, including a WER regression test                |
+| OpenWhispr is mostly cloud                               | It also runs local sherpa-onnx Parakeet and whisper.cpp              |
+| Voxtype's CI checks accuracy with real inference         | It is a QEMU check that a baseline-CPU build does not crash (SIGILL) |
 
 ---
 
@@ -282,17 +282,18 @@ Effort: 1–2 days.
 
 ### 5.2 Datasets
 
-| Set | Contents | Source |
-|---|---|---|
-| Public | 200 clips × 7 Open ASR Leaderboard sets (AMI, Earnings22, GigaSpeech, LibriSpeech clean/other, SPGISpeech, VoxPopuli), fixed seed, resumable | `sayso/scripts/benchmark/prepare.py:26-37`, `score.py` |
-| Personal | 100–200 of the owner's dictations, tagged `quiet`/`noisy`, `short`/`long`, `jargon`, `names`. **Kept outside git.** | new |
-| Long-form | Public clips stitched into 60, 120 and 180 s recordings with 0.2–1 s gaps | sherpa Parakeet READMEs (4.2) |
-| Augmented | Each clip with 0–5 s of silence at start and end, and noise at 0/5/10/15 dB SNR | NeMo `tools/asr_evaluator/conf/eval.yaml:24-38` |
-| No-vocabulary control | Clips containing none of the vocabulary terms, to detect boosting and fuzzy false positives | new |
+| Set                   | Contents                                                                                                                                     | Source                                                 |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Public                | 200 clips × 7 Open ASR Leaderboard sets (AMI, Earnings22, GigaSpeech, LibriSpeech clean/other, SPGISpeech, VoxPopuli), fixed seed, resumable | `sayso/scripts/benchmark/prepare.py:26-37`, `score.py` |
+| Personal              | 100–200 of the owner's dictations, tagged `quiet`/`noisy`, `short`/`long`, `jargon`, `names`. **Kept outside git.**                          | new                                                    |
+| Long-form             | Public clips stitched into 60, 120 and 180 s recordings with 0.2–1 s gaps                                                                    | sherpa Parakeet READMEs (4.2)                          |
+| Augmented             | Each clip with 0–5 s of silence at start and end, and noise at 0/5/10/15 dB SNR                                                              | NeMo `tools/asr_evaluator/conf/eval.yaml:24-38`        |
+| No-vocabulary control | Clips containing none of the vocabulary terms, to detect boosting and fuzzy false positives                                                  | new                                                    |
 
 ### 5.3 Done when
 
 One command produces, for each configuration:
+
 - WER under both normalizers, plus formatted WER;
 - substitution, insertion and deletion counts;
 - keyword precision, recall and F1;
@@ -451,18 +452,18 @@ never audio).
 - **CI:** add `.github/workflows/ci.yml` running `make check` (fmt, clippy,
   tests without a model). Keep the model-gated tests and the eval run local,
   for example in a pre-push hook: `hype-flow-evaluate --config docs/eval.toml
-  --max-wer <baseline + margin>`.
+--max-wer <baseline + margin>`.
 
 ### A9. Later or optional
 
-| Item | Effort | Note |
-|---|---|---|
-| Upgrade sherpa-onnx to 2.0.x | medium | TDT beam search rewrite, `length_reward`, VAD Flush fix. Needs new release SHAs in `src/setup.rs`. Only worth it if boosting survives A3. |
-| Gate fuzzy correction on confidence | small | Only correct words whose tokens have low `ys_log_probs` (present in 1.13.8). Pass them from worker to app. |
-| Learn corrections from user edits | large | OpenWhispr `openwhispr-mobile/src/lib/correctionLearner.ts` (Levenshtein/len < 0.65, ≥ 3 letters). Hard on Wayland: Hype Flow cannot read the text field after pasting. |
-| LLM cleanup | large | llama.cpp with a JSON-schema list of edits (`grammars/README.md`, `tools/server/README.md:585-603`). Apply Sussurro's guards: keep ≥ 50% of the content, a minimum word count, cut at hallucination markers, 350-word chunks (`internal/llm/llama.go:80-96, 313-360`). Estimated +0.3–1 s and +0.5–1 GB on CPU. |
-| Spoken punctuation ("new line", "comma") | small | Sayso `internal/enhance/text.go:247`; Voxtype stage order `src/text/mod.rs:303-377`. |
-| Fine-tune on the owner's voice | research | NeMo adapters (`examples/asr/asr_adapters`, dim 32, ~1000 steps). Hours on CPU, then ONNX re-export; adapter export not verified. |
+| Item                                     | Effort   | Note                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upgrade sherpa-onnx to 2.0.x             | medium   | TDT beam search rewrite, `length_reward`, VAD Flush fix. Needs new release SHAs in `src/setup.rs`. Only worth it if boosting survives A3.                                                                                                                                                                       |
+| Gate fuzzy correction on confidence      | small    | Only correct words whose tokens have low `ys_log_probs` (present in 1.13.8). Pass them from worker to app.                                                                                                                                                                                                      |
+| Learn corrections from user edits        | large    | OpenWhispr `openwhispr-mobile/src/lib/correctionLearner.ts` (Levenshtein/len < 0.65, ≥ 3 letters). Hard on Wayland: Hype Flow cannot read the text field after pasting.                                                                                                                                         |
+| LLM cleanup                              | large    | llama.cpp with a JSON-schema list of edits (`grammars/README.md`, `tools/server/README.md:585-603`). Apply Sussurro's guards: keep ≥ 50% of the content, a minimum word count, cut at hallucination markers, 350-word chunks (`internal/llm/llama.go:80-96, 313-360`). Estimated +0.3–1 s and +0.5–1 GB on CPU. |
+| Spoken punctuation ("new line", "comma") | small    | Sayso `internal/enhance/text.go:247`; Voxtype stage order `src/text/mod.rs:303-377`.                                                                                                                                                                                                                            |
+| Fine-tune on the owner's voice           | research | NeMo adapters (`examples/asr/asr_adapters`, dim 32, ~1000 steps). Hours on CPU, then ONNX re-export; adapter export not verified.                                                                                                                                                                               |
 
 ---
 
@@ -593,19 +594,19 @@ working memory.
 
 ## 9. Order of work
 
-| # | Item | Effort | Accuracy | Latency | Memory | Proof |
-|---|---|---|---|---|---|---|
-| 0 | Measurement harness (5) | 1–2 d | enables all | enables all | enables all | one-command table |
-| 1 | A1 fuzzy correction fix | 2 h | **high** (verified bug) | — | — | control-set keyword precision |
-| 2 | A3 + A4 boosting decision, repeat filter | ½ d | medium | + if beam is dropped | — | keyword F1, control WER |
-| 3 | A2 + M1 decode in pieces | 1–2 d | high on long dictation | — | **high** on long dictation | length-bucket WER, `VmHWM` |
-| 4 | L1 decode while talking | 2–3 d | — | **high** | — | p50/p95 capture-to-paste |
-| 5 | L2 pre-paste wait | 2 h | — | up to −150 ms | — | delivery p50 |
-| 6 | L3 threads, A6 VAD/denoise grid | 2 h | medium | medium | low | eval table |
-| 7 | A8 golden tests, invariance tests, CI | 1 d | prevents regressions | prevents regressions | — | CI green |
-| 8 | A5 gain, A7 number formatting | 1–2 d | low–medium | — | — | quiet-tag WER, formatted WER |
-| 9 | M2 faster unload, M3 low-memory model | ½ d | — | — | high for low-RAM users | PSS |
-| 10 | A9 options (sherpa 2.0.x, LLM, learning from edits, fine-tuning) | large | situational | LLM adds latency | LLM adds memory | eval table |
+| #   | Item                                                             | Effort | Accuracy                | Latency              | Memory                     | Proof                         |
+| --- | ---------------------------------------------------------------- | ------ | ----------------------- | -------------------- | -------------------------- | ----------------------------- |
+| 0   | Measurement harness (5)                                          | 1–2 d  | enables all             | enables all          | enables all                | one-command table             |
+| 1   | A1 fuzzy correction fix                                          | 2 h    | **high** (verified bug) | —                    | —                          | control-set keyword precision |
+| 2   | A3 + A4 boosting decision, repeat filter                         | ½ d    | medium                  | + if beam is dropped | —                          | keyword F1, control WER       |
+| 3   | A2 + M1 decode in pieces                                         | 1–2 d  | high on long dictation  | —                    | **high** on long dictation | length-bucket WER, `VmHWM`    |
+| 4   | L1 decode while talking                                          | 2–3 d  | —                       | **high**             | —                          | p50/p95 capture-to-paste      |
+| 5   | L2 pre-paste wait                                                | 2 h    | —                       | up to −150 ms        | —                          | delivery p50                  |
+| 6   | L3 threads, A6 VAD/denoise grid                                  | 2 h    | medium                  | medium               | low                        | eval table                    |
+| 7   | A8 golden tests, invariance tests, CI                            | 1 d    | prevents regressions    | prevents regressions | —                          | CI green                      |
+| 8   | A5 gain, A7 number formatting                                    | 1–2 d  | low–medium              | —                    | —                          | quiet-tag WER, formatted WER  |
+| 9   | M2 faster unload, M3 low-memory model                            | ½ d    | —                       | —                    | high for low-RAM users     | PSS                           |
+| 10  | A9 options (sherpa 2.0.x, LLM, learning from edits, fine-tuning) | large  | situational             | LLM adds latency     | LLM adds memory            | eval table                    |
 
 ---
 
@@ -631,15 +632,15 @@ Do not redo these.
 
 ## 11. Ruled out
 
-| Idea | Why |
-|---|---|
-| Switch to parakeet-tdt v2 or v3 | Unified is already the best English Parakeet (4.5) |
-| LM shallow fusion | sherpa-onnx's NeMo transducer path ignores `lm_config` (4.6) |
-| Punctuation model | Parakeet already outputs punctuation and case |
-| sherpa homophone replacer | Uses a Chinese pinyin lexicon; no use for English |
-| sherpa's shipped ITN FSTs | Only a Chinese FST ships (agent-reported); use `text-processing-rs` instead |
-| WhisperX alignment | Parakeet TDT already gives token timestamps |
-| Whisper decoding thresholds (temperature fallback, compression ratio, no-speech) | Whisper-specific; not applicable to a transducer |
+| Idea                                                                             | Why                                                                         |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Switch to parakeet-tdt v2 or v3                                                  | Unified is already the best English Parakeet (4.5)                          |
+| LM shallow fusion                                                                | sherpa-onnx's NeMo transducer path ignores `lm_config` (4.6)                |
+| Punctuation model                                                                | Parakeet already outputs punctuation and case                               |
+| sherpa homophone replacer                                                        | Uses a Chinese pinyin lexicon; no use for English                           |
+| sherpa's shipped ITN FSTs                                                        | Only a Chinese FST ships (agent-reported); use `text-processing-rs` instead |
+| WhisperX alignment                                                               | Parakeet TDT already gives token timestamps                                 |
+| Whisper decoding thresholds (temperature fallback, compression ratio, no-speech) | Whisper-specific; not applicable to a transducer                            |
 
 ## 12. Open questions
 
@@ -660,6 +661,7 @@ Paths are relative to `/home/dj/tmp-whisper/<project>/` unless they start with
 `src/`, `worker/`, `tests/` or `docs/`, which are Hype Flow paths.
 
 ### Accuracy harness and metrics
+
 - `sayso/docs/benchmark.md`
 - `sayso/scripts/benchmark/prepare.py`, `score.py`
 - `whisper.cpp/tests/librispeech/normalizers/english.py`, `english.json`
@@ -676,6 +678,7 @@ Paths are relative to `/home/dj/tmp-whisper/<project>/` unless they start with
   `Fixtures/README.md`
 
 ### Vocabulary and cleanup
+
 - `voxtype/src/text/vocabulary.rs:97-146`, `src/text/itn.rs`,
   `src/text/mod.rs:303-377`
 - `sussurro/internal/llm/correction.go:309-487`, `internal/llm/llama.go`
@@ -687,6 +690,7 @@ Paths are relative to `/home/dj/tmp-whisper/<project>/` unless they start with
 - `sayso/internal/enhance/text.go`
 
 ### Audio, VAD and chunking
+
 - `sherpa-onnx-1.13.8/sherpa-onnx/csrc/voice-activity-detector.cc`
 - `sherpa-onnx/scripts/nemo/parakeet-tdt-0.6b-ultra/README.md`,
   `parakeet-tdt-0.6b-v2/README.md`, `parakeet-unified-en-0.6b/notes.md`
@@ -698,14 +702,17 @@ Paths are relative to `/home/dj/tmp-whisper/<project>/` unless they start with
 - `whisper.cpp/src/whisper.cpp:6873-6886`
 
 ### Model data
+
 - `Handy/src-tauri/src/catalog/catalog.json` (`results.*.accuracy`, dataset
   `fleurs`)
 
 ### Delivery
+
 - `openwhispr/src/helpers/clipboard.js:22-34`
 - `voxtype/src/output/active_window.rs`, `src/output/clipboard_restore.rs`
 
 ### Optional LLM cleanup
+
 - `llama.cpp/grammars/README.md`, `tools/server/README.md:585-603`,
   `docs/speculative.md:181-186`
 

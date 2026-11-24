@@ -1,6 +1,6 @@
 # Copy to ~/.config/hype-flow/config.toml. Every key is optional.
 language = "en"
-model_variant = "parakeet-ctc" # or "low-memory" (TDT) or "unified"; next download
+model_variant = "parakeet-ctc"  # or "low-memory" (TDT) or "unified"; next download
 # These models support English. "auto" is accepted for old configurations.
 input_target = "auto"
 paste = true
@@ -9,7 +9,7 @@ paste = true
 modifier_release_guard = false
 threads = 4
 dictation_shortcut = "Alt+Space"
-dictation_mode = "toggle" # "hold" requires native niri press/release bindings
+dictation_mode = "toggle"  # "hold" requires native niri press/release bindings
 cancel_shortcut = "Mod+Ctrl+Escape"
 # Model files and runtime installed by the app:
 # model = "/absolute/path/to/parakeet-110m-ctc-en-int8"
@@ -44,18 +44,18 @@ remove_repetitions = false
 
 # Advanced evaluation controls. Defaults stay unchanged until corpus measurements
 # establish a better accuracy/latency trade-off. Beam paths apply only to boosting.
-blank_penalty = 0.0 # range 0–2
-max_active_paths = 4 # range 1–16
-vad_threshold = 0.3 # range 0.1–0.9
-vad_min_silence = 0.45 # seconds, range 0.1–2
-max_piece_seconds = 15 # range 5–60; bounded quiet-window cuts also apply without VAD
+blank_penalty = 0.0  # range 0–2
+max_active_paths = 4  # range 1–16
+vad_threshold = 0.3  # range 0.1–0.9
+vad_min_silence = 0.45  # seconds, range 0.1–2
+max_piece_seconds = 15  # range 5–60; bounded quiet-window cuts also apply without VAD
 cut_silence = true
 noise_suppression = false
 
 # Closed pieces decode while recording. Audio leaves the capture buffer once
 # queued; cancellation stops inference and discards the pending pieces.
 # Input shorter than 300 ms is rejected before final inference.
-keep_mic_ready = false # holds the microphone open for 30 seconds after stopping
+keep_mic_ready = false  # holds the microphone open for 30 seconds after stopping
 # 0 = never; 1, 2, 5, 10, 15, 30, 60 = idle minutes;
 # 4294967295 = after each dictation. Reload overlaps the next recording.
 unload_minutes = 10

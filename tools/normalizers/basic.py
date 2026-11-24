@@ -1,6 +1,4 @@
-import re
 import unicodedata
-
 
 # non-ASCII letters that are not separated by "NFKD" normalization
 ADDITIONAL_DIACRITICS = {
@@ -38,7 +36,9 @@ def remove_symbols_and_diacritics(s: str, keep=""):
                 else (
                     ""
                     if unicodedata.category(c) == "Mn"
-                    else " " if unicodedata.category(c)[0] in "MSP" else c
+                    else " "
+                    if unicodedata.category(c)[0] in "MSP"
+                    else c
                 )
             )
         )

@@ -1,9 +1,9 @@
 import json
 import os
 import re
+from collections.abc import Iterator
 from fractions import Fraction
-from typing import Iterator, List, Match, Optional, Union
-
+from re import Match
 
 from .basic import remove_symbols_and_diacritics
 
@@ -140,30 +140,28 @@ class EnglishNumberNormalizer:
         }
         self.specials = {"and", "double", "triple", "point"}
 
-        self.words = set(
-            [
-                key
-                for mapping in [
-                    self.zeros,
-                    self.ones,
-                    self.ones_suffixed,
-                    self.tens,
-                    self.tens_suffixed,
-                    self.multipliers,
-                    self.multipliers_suffixed,
-                    self.preceding_prefixers,
-                    self.following_prefixers,
-                    self.suffixers,
-                    self.specials,
-                ]
-                for key in mapping
+        self.words = {
+            key
+            for mapping in [
+                self.zeros,
+                self.ones,
+                self.ones_suffixed,
+                self.tens,
+                self.tens_suffixed,
+                self.multipliers,
+                self.multipliers_suffixed,
+                self.preceding_prefixers,
+                self.following_prefixers,
+                self.suffixers,
+                self.specials,
             ]
-        )
+            for key in mapping
+        }
         self.literal_words = {"one", "ones"}
 
-    def process_words(self, words: List[str]) -> Iterator[str]:
-        prefix: Optional[str] = None
-        value: Optional[Union[str, int]] = None
+    def process_words(self, words: list[str]) -> Iterator[str]:
+        prefix: str | None = None
+        value: str | int | None = None
         skip = False
 
         def to_fraction(s: str):
@@ -172,7 +170,7 @@ class EnglishNumberNormalizer:
             except ValueError:
                 return None
 
-        def output(result: Union[str, int]):
+        def output(result: str | int):
             nonlocal prefix, value
             result = str(result)
             if prefix is not None:
@@ -453,16 +451,19 @@ class EnglishSpellingNormalizer:
     [1] https://www.tysto.com/uk-us-spelling-list.html
     """
 
-    def __init__(self):
-        mapping_path = os.path.join(os.path.dirname(__file__), "english.json")
-        self.mapping = json.load(open(mapping_path))
+    def __init__(self, mapping=None):
+        if mapping is None:
+            mapping_path = os.path.join(os.path.dirname(__file__), "english.json")
+            with open(mapping_path) as source:
+                mapping = json.load(source)
+        self.mapping = mapping
 
     def __call__(self, s: str):
         return " ".join(self.mapping.get(word, word) for word in s.split())
 
 
 class EnglishTextNormalizer:
-    def __init__(self):
+    def __init__(self, spelling_mapping=None):
         self.ignore_patterns = r"\b(hmm|mm|mhm|mmm|uh|um)\b"
         self.replacers = {
             # common contractions
@@ -520,7 +521,7 @@ class EnglishTextNormalizer:
             r"'m\b": " am",
         }
         self.standardize_numbers = EnglishNumberNormalizer()
-        self.standardize_spellings = EnglishSpellingNormalizer()
+        self.standardize_spellings = EnglishSpellingNormalizer(spelling_mapping)
 
     def __call__(self, s: str):
         s = s.lower()

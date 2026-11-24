@@ -2,7 +2,7 @@
 # Install the staged Rust application without changing compositor settings.
 set -eu
 
-project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 prefix=${HYPE_FLOW_PREFIX:-"$HOME/.local"}
 data=${XDG_DATA_HOME:-"$HOME/.local/share"}/hype-flow
 applications=${XDG_DATA_HOME:-"$HOME/.local/share"}/applications
@@ -39,7 +39,7 @@ install -m644 "$project/assets/logo.svg" "$icons/dev.hype.Flow.svg"
 escaped=$(printf '%s' "$prefix/bin/hype-flow" | sed 's/[\\"`$]/\\&/g; s/\\/\\\\/g; s/%/%%/g')
 desktop_stage=$(mktemp "$applications/.hype-flow.desktop.XXXXXX")
 trap 'rm -f "$desktop_stage"' EXIT HUP INT TERM
-cat > "$desktop_stage" <<DESKTOP
+cat >"$desktop_stage" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Hype Flow

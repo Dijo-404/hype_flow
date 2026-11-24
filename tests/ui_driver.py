@@ -3,17 +3,17 @@
 
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import Gio, GLib, Gtk  # noqa: E402, RUF100
 
 
 def wait(predicate, description, timeout=15):
@@ -29,15 +29,23 @@ def wait(predicate, description, timeout=15):
 
 
 def focused():
-    return json.loads(subprocess.check_output(["niri", "msg", "--json", "focused-window"], timeout=3))
+    return json.loads(
+        subprocess.check_output(["niri", "msg", "--json", "focused-window"], timeout=3)
+    )
 
 
 def overlay_visible():
-    layers = json.loads(subprocess.check_output(["niri", "msg", "--json", "layers"], timeout=3))
+    layers = json.loads(
+        subprocess.check_output(["niri", "msg", "--json", "layers"], timeout=3)
+    )
+
     def contains(value):
         if isinstance(value, dict):
-            return value.get("namespace") == "hype-flow" or any(contains(item) for item in value.values())
+            return value.get("namespace") == "hype-flow" or any(
+                contains(item) for item in value.values()
+            )
         return isinstance(value, list) and any(contains(item) for item in value)
+
     return contains(layers)
 
 
@@ -49,15 +57,26 @@ def write_executable(path, text):
 def main():
     executable = str(Path(sys.argv[1]).resolve())
     Gtk.init()
-    target_app = Gtk.Application(application_id="dev.hype.Flow.TestTarget", flags=Gio.ApplicationFlags.NON_UNIQUE)
+    target_app = Gtk.Application(
+        application_id="dev.hype.Flow.TestTarget", flags=Gio.ApplicationFlags.NON_UNIQUE
+    )
     target_app.register(None)
-    window = Gtk.ApplicationWindow(application=target_app, title="Hype Flow controlled paste target")
+    window = Gtk.ApplicationWindow(
+        application=target_app, title="Hype Flow controlled paste target"
+    )
     editor = Gtk.TextView()
     window.set_child(editor)
     window.set_default_size(600, 350)
     window.present()
     editor.grab_focus()
-    target = wait(lambda: (current if (current := focused()) and current.get("pid") == os.getpid() else None), "controlled target focus")
+    target = wait(
+        lambda: (
+            current
+            if (current := focused()) and current.get("pid") == os.getpid()
+            else None
+        ),
+        "controlled target focus",
+    )
 
     with tempfile.TemporaryDirectory(prefix="hype-flow-ui-") as temporary:
         root = Path(temporary)
@@ -74,7 +93,12 @@ def main():
             (model.parent / name).touch()
         (backend / "recognizer.version").write_text("8\n")
         worker_started = root / "worker-started"
-        write_executable(backend / "recognizer", "#!" + sys.executable + "\n" + r'''
+        write_executable(
+            backend / "recognizer",
+            "#!"
+            + sys.executable
+            + "\n"
+            + r"""
 from pathlib import Path
 import json, os, struct, sys, time
 Path(os.environ["HYPE_TEST_WORKER_STARTED"]).touch()
@@ -96,8 +120,14 @@ while True:
         remaining -= len(data)
     time.sleep(0.4)
     send({"text": "um open ai hello."})
-''')
-        write_executable(fake / "pw-record", "#!" + sys.executable + "\n" + r'''
+""",
+        )
+        write_executable(
+            fake / "pw-record",
+            "#!"
+            + sys.executable
+            + "\n"
+            + r"""
 import os, sys, time
 with open(os.environ["HYPE_TEST_PID_FILE"], "a") as log:
     log.write(str(os.getpid()) + "\n")
@@ -105,25 +135,53 @@ while True:
     sys.stdout.buffer.write(bytes([1, 0]) * 800)
     sys.stdout.buffer.flush()
     time.sleep(1 if os.path.exists(os.environ["HYPE_TEST_SHORT_CAPTURE"]) else 0.05)
-''')
+""",
+        )
         write_executable(fake / "pw-dump", "#!/bin/sh\nprintf '[]'\n")
-        write_executable(fake / "niri", "#!" + sys.executable + "\n" + r'''
+        write_executable(
+            fake / "niri",
+            "#!"
+            + sys.executable
+            + "\n"
+            + r"""
 import os, sys, time
 if sys.argv[1:] == ["msg", "--json", "focused-window"] and os.path.exists(os.environ["HYPE_TEST_DELAY"]):
     time.sleep(0.4)
 os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
-''')
-        (config / "config.toml").write_text('recover_recordings = true\nsounds = false\npause_media = false\nkeep_mic_ready = true\ncorrections = "open ai => OpenAI"\ndictation_shortcut = "Alt+Space"\n')
+""",
+        )
+        (config / "config.toml").write_text(
+            'recover_recordings = true\nsounds = false\npause_media = false\nkeep_mic_ready = true\ncorrections = "open ai => OpenAI"\ndictation_shortcut = "Alt+Space"\n'
+        )
         niri_config = root / "config/niri/config.kdl"
         niri_config.parent.mkdir(parents=True)
         niri_config.write_text('input { keyboard { xkb { layout "us"; }; }; }\n')
-        env = {**os.environ, "XDG_DATA_HOME": str(root / "data"), "XDG_CONFIG_HOME": str(root / "config"), "XDG_STATE_HOME": str(root / "state"), "NIRI_CONFIG": str(niri_config), "PATH": str(fake) + ":" + os.environ["PATH"], "HYPE_TEST_PID_FILE": str(root / "capture-pids"), "HYPE_TEST_DELAY": str(root / "focus-delay")}
+        env = {
+            **os.environ,
+            "XDG_DATA_HOME": str(root / "data"),
+            "XDG_CONFIG_HOME": str(root / "config"),
+            "XDG_STATE_HOME": str(root / "state"),
+            "NIRI_CONFIG": str(niri_config),
+            "PATH": str(fake) + ":" + os.environ["PATH"],
+            "HYPE_TEST_PID_FILE": str(root / "capture-pids"),
+            "HYPE_TEST_DELAY": str(root / "focus-delay"),
+        }
         short_capture = root / "short-capture"
         env["HYPE_TEST_SHORT_CAPTURE"] = str(short_capture)
         env["HYPE_TEST_WORKER_STARTED"] = str(worker_started)
         log = (root / "app.log").open("wb")
-        app = subprocess.Popen([executable, "--background"], env=env, stdout=log, stderr=log, start_new_session=True)
-        group = Gio.DBusActionGroup.get(Gio.bus_get_sync(Gio.BusType.SESSION, None), "dev.hype.Flow", "/dev/hype/Flow")
+        app = subprocess.Popen(
+            [executable, "--background"],
+            env=env,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+        group = Gio.DBusActionGroup.get(
+            Gio.bus_get_sync(Gio.BusType.SESSION, None),
+            "dev.hype.Flow",
+            "/dev/hype/Flow",
+        )
 
         def state():
             assert app.poll() is None, "Rust app exited unexpectedly"
@@ -154,15 +212,24 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             assert "Recording too short" in state()[1], state()
             short_capture.unlink()
             group.activate_action("toggle", None)
-            wait(lambda: phase("recording"), "single shortcut starts again after a short recording", timeout=4)
+            wait(
+                lambda: phase("recording"),
+                "single shortcut starts again after a short recording",
+                timeout=4,
+            )
             group.activate_action("cancel", None)
             wait(lambda: phase("idle"), "cancel retried recording")
             group.activate_action("shortcuts", None)
-            wait(lambda: niri_config.with_name("hype-flow.kdl").exists(), "custom shortcut installation")
+            wait(
+                lambda: niri_config.with_name("hype-flow.kdl").exists(),
+                "custom shortcut installation",
+            )
             bindings = niri_config.with_name("hype-flow.kdl").read_text()
             assert "Alt+Space" in bindings and "Mod+Ctrl+Space" not in bindings
             assert "Mod+Ctrl+Escape" in bindings
-            subprocess.run(["wl-copy", "--sensitive"], input=b"previous clipboard", check=True)
+            subprocess.run(
+                ["wl-copy", "--sensitive"], input=b"previous clipboard", check=True
+            )
             group.activate_action("toggle", None)
             wait(lambda: phase("recording"), "microphone ready")
             assert focused()["id"] == target["id"], "Overlay stole focus"
@@ -171,15 +238,26 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             notch_actions = Gio.SimpleActionGroup()
             notch_action = Gio.SimpleAction.new("dictation", None)
             notch_actions.add_action(notch_action)
-            exported = connection.export_action_group("/dev/hype_niri/Notch", notch_actions)
-            owner = Gio.bus_own_name_on_connection(connection, "dev.hype_niri.Notch", Gio.BusNameOwnerFlags.NONE, None, None)
+            exported = connection.export_action_group(
+                "/dev/hype_niri/Notch", notch_actions
+            )
+            owner = Gio.bus_own_name_on_connection(
+                connection,
+                "dev.hype_niri.Notch",
+                Gio.BusNameOwnerFlags.NONE,
+                None,
+                None,
+            )
             try:
                 wait(lambda: not overlay_visible(), "notch suppresses fallback overlay")
                 assert focused()["id"] == target["id"], "Notch handover stole focus"
                 notch_actions.remove_action("dictation")
                 wait(overlay_visible, "notch action removal restores fallback")
                 notch_actions.add_action(notch_action)
-                wait(lambda: not overlay_visible(), "notch action return suppresses fallback")
+                wait(
+                    lambda: not overlay_visible(),
+                    "notch action return suppresses fallback",
+                )
             finally:
                 Gio.bus_unown_name(owner)
                 connection.unexport_action_group(exported)
@@ -189,7 +267,13 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             notch = Gio.SimpleActionGroup()
             notch.add_action(Gio.SimpleAction.new("dictation", None))
             exported = connection.export_action_group("/dev/hype_niri/Notch", notch)
-            owner = Gio.bus_own_name_on_connection(connection, "dev.hype_niri.Notch", Gio.BusNameOwnerFlags.NONE, None, None)
+            owner = Gio.bus_own_name_on_connection(
+                connection,
+                "dev.hype_niri.Notch",
+                Gio.BusNameOwnerFlags.NONE,
+                None,
+                None,
+            )
             wait(lambda: not overlay_visible(), "notch suppresses fallback overlay")
             notch.remove_action("dictation")
             wait(overlay_visible, "missing notch action restores fallback")
@@ -204,8 +288,16 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
                 wait(lambda: phase("done"), "transcript delivery")
                 wait(lambda: text() == "OpenAI hello.", "paste into original target")
             except AssertionError as error:
-                raise AssertionError(f"{error}. Status: {state()!r}, target text: {text()!r}") from error
-            wait(lambda: subprocess.check_output(["wl-paste", "--no-newline"]) == b"previous clipboard", "clipboard restoration")
+                raise AssertionError(
+                    f"{error}. Status: {state()!r}, target text: {text()!r}"
+                ) from error
+            wait(
+                lambda: (
+                    subprocess.check_output(["wl-paste", "--no-newline"])
+                    == b"previous clipboard"
+                ),
+                "clipboard restoration",
+            )
             runtime = Path(os.environ["XDG_RUNTIME_DIR"]) / "hype-flow"
             raw = runtime / "last-raw-transcript.txt"
             cleaned = runtime / "last-transcript.txt"
@@ -213,7 +305,13 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             assert cleaned.read_text() == "OpenAI hello."
             assert raw.stat().st_mode & 0o777 == 0o600
             group.activate_action("copy-raw", None)
-            wait(lambda: subprocess.check_output(["wl-paste", "--no-newline"]) == b"um open ai hello.", "original recovery")
+            wait(
+                lambda: (
+                    subprocess.check_output(["wl-paste", "--no-newline"])
+                    == b"um open ai hello."
+                ),
+                "original recovery",
+            )
             group.activate_action("toggle", None)
             wait(lambda: phase("recording"), "second recording")
             wait(lambda: state()[3] >= 0.35, "minimum recording duration before decode")
@@ -229,39 +327,89 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
             assert text() == "OpenAI hello.", "Cancelled decode pasted late text"
             subprocess.run([executable, "--cancel"], env=env, check=True, timeout=5)
             subprocess.run([executable], env=env, check=True, timeout=5)
+
             def settings_focused():
                 current = focused()
-                return current and current["app_id"] == "dev.hype.Flow" and current["pid"] == app.pid
+                return (
+                    current
+                    and current["app_id"] == "dev.hype.Flow"
+                    and current["pid"] == app.pid
+                )
 
             def keys(*args):
                 subprocess.run(["wtype", *args], check=True, timeout=5)
 
             wait(settings_focused, "launcher settings window")
             for key in ("w", "q"):
-                keys("-M", "ctrl", "-M", "shift", "-k", key, "-m", "shift", "-m", "ctrl")
+                keys(
+                    "-M", "ctrl", "-M", "shift", "-k", key, "-m", "shift", "-m", "ctrl"
+                )
                 time.sleep(0.15)
-                assert settings_focused() and app.poll() is None, f"Ctrl+Shift+{key.upper()} closed settings"
+                assert settings_focused() and app.poll() is None, (
+                    f"Ctrl+Shift+{key.upper()} closed settings"
+                )
             keys("-M", "ctrl", "-k", "w", "-m", "ctrl")
-            wait(lambda: not any(item.get("pid") == app.pid for item in json.loads(subprocess.check_output(["niri", "msg", "--json", "windows"]))), "Ctrl+W hides settings")
+            wait(
+                lambda: (
+                    not any(
+                        item.get("pid") == app.pid
+                        for item in json.loads(
+                            subprocess.check_output(
+                                ["niri", "msg", "--json", "windows"]
+                            )
+                        )
+                    )
+                ),
+                "Ctrl+W hides settings",
+            )
             assert app.poll() is None
             subprocess.run([executable], env=env, check=True, timeout=5)
             wait(settings_focused, "launcher reopens settings in the same process")
             keys("-M", "ctrl", "-k", "q", "-m", "ctrl")
             app.wait(timeout=8)
             assert app.returncode == 0
-            assert not raw.exists() and not cleaned.exists(), "Transcript not removed at exit"
+            assert not raw.exists() and not cleaned.exists(), (
+                "Transcript not removed at exit"
+            )
             log.close()
             diagnostics = (root / "app.log").read_text()
-            assert "panicked" not in diagnostics and "CRITICAL" not in diagnostics, diagnostics
-            print("Rust desktop integration: actions/status, capture, no-focus overlay, cleanup, paste, clipboard restoration, raw recovery, cancelled decode, launcher and shutdown passed")
+            assert "panicked" not in diagnostics and "CRITICAL" not in diagnostics, (
+                diagnostics
+            )
+            print(
+                "Rust desktop integration: actions/status, capture, no-focus overlay, cleanup, paste, clipboard restoration, raw recovery, cancelled decode, launcher and shutdown passed"
+            )
             for scenario in ("pending openers", "delivery shutdown"):
-                subprocess.run(["niri", "msg", "action", "focus-window", "--id", str(target["id"])], check=True)
+                subprocess.run(
+                    [
+                        "niri",
+                        "msg",
+                        "action",
+                        "focus-window",
+                        "--id",
+                        str(target["id"]),
+                    ],
+                    check=True,
+                )
                 editor.grab_focus()
                 wait(lambda: focused()["id"] == target["id"], "test target focus")
                 log = (root / "app.log").open("ab")
-                app = subprocess.Popen([executable, "--background"], env=env, stdout=log, stderr=log, start_new_session=True)
-                group = Gio.DBusActionGroup.get(Gio.bus_get_sync(Gio.BusType.SESSION, None), "dev.hype.Flow", "/dev/hype/Flow")
-                wait(lambda: group.has_action("toggle") and phase("idle"), "restart ready")
+                app = subprocess.Popen(
+                    [executable, "--background"],
+                    env=env,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                )
+                group = Gio.DBusActionGroup.get(
+                    Gio.bus_get_sync(Gio.BusType.SESSION, None),
+                    "dev.hype.Flow",
+                    "/dev/hype/Flow",
+                )
+                wait(
+                    lambda group=group: group.has_action("toggle") and phase("idle"),
+                    "restart ready",
+                )
                 before = text()
                 if scenario == "pending openers":
                     (root / "focus-delay").touch()
@@ -273,7 +421,10 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
                 else:
                     group.activate_action("toggle", None)
                     wait(lambda: phase("recording"), "shutdown recording")
-                    wait(lambda: state()[3] >= 0.35, "minimum recording duration before delivery")
+                    wait(
+                        lambda: state()[3] >= 0.35,
+                        "minimum recording duration before delivery",
+                    )
                     group.activate_action("toggle", None)
                     wait(lambda: phase("delivering"), "delivery before shutdown")
                 group.activate_action("quit", None)
@@ -285,12 +436,20 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
                     while GLib.MainContext.default().iteration(False):
                         pass
                     time.sleep(0.01)
-                assert text() == before, scenario + " pasted text after cancellation/quit"
+                assert text() == before, (
+                    scenario + " pasted text after cancellation/quit"
+                )
                 for pid in (root / "capture-pids").read_text().split():
                     process = Path("/proc") / pid
-                    assert not process.exists() or process.joinpath("stat").read_text().split(") ", 1)[1].startswith("Z"), "Microphone child survived " + scenario
+                    assert not process.exists() or process.joinpath(
+                        "stat"
+                    ).read_text().split(") ", 1)[1].startswith("Z"), (
+                        "Microphone child survived " + scenario
+                    )
                 assert not raw.exists() and not cleaned.exists()
-                assert not list((root / "state/hype-flow/spool").glob("*.pcm")), "Cancelled recording survived shutdown"
+                assert not list((root / "state/hype-flow/spool").glob("*.pcm")), (
+                    "Cancelled recording survived shutdown"
+                )
                 log.close()
                 print("Rust desktop regression: " + scenario + " passed")
         finally:

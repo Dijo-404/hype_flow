@@ -110,7 +110,6 @@ edits, Soundex, and an exact consonant-skeleton check preserve known split-name
 and vowel-heavy-name cases. Soundex no longer reduces the edit-distance score.
 Fuzzy matching remains opt-in; no measured corpus-wide accuracy gain is claimed.
 
-
 ## Conservative English number and restart processing
 
 `src/itn.rs`, `src/restarts.rs` and the word-diff helper in `src/text_diff.rs`

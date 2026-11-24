@@ -30,14 +30,14 @@ The Hype Flow core (`src/*.rs`, `worker/src/main.rs`, `worker/src/bindings.rs`)
 was read first and summarized as a baseline. The reference repositories were
 then surveyed file by file in six parallel groups:
 
-| Group | Repositories |
-|---|---|
-| A | Handy, OpenSuperWhisper |
-| B | OpenWhispr |
-| C | Voxtype, Sussurro |
-| D | Vocalinux, Sayso |
-| E | sherpa-onnx 1.13.8 (pinned), sherpa-onnx main (2.0.3), silero-vad |
-| F | whisper.cpp, faster-whisper, whisperX, NeMo, Speech, llama.cpp |
+| Group | Repositories                                                      |
+| ----- | ----------------------------------------------------------------- |
+| A     | Handy, OpenSuperWhisper                                           |
+| B     | OpenWhispr                                                        |
+| C     | Voxtype, Sussurro                                                 |
+| D     | Vocalinux, Sayso                                                  |
+| E     | sherpa-onnx 1.13.8 (pinned), sherpa-onnx main (2.0.3), silero-vad |
+| F     | whisper.cpp, faster-whisper, whisperX, NeMo, Speech, llama.cpp    |
 
 The key claims behind the top recommendations were then checked directly
 against the source files.
@@ -71,22 +71,22 @@ Coverage limits:
 
 ## 2. Hype Flow baseline before the accuracy and memory work
 
-| Area | Current implementation |
-|---|---|
-| Capture | `pw-record --raw` s16, 16 kHz mono (`src/audio.rs`). 1 s pre-roll ring, optional keep-mic-ready, 5 s first-audio timeout, level meter. |
-| Recognizer | Separate `hype-flow-recognizer` process (`worker/src/main.rs`). It loads the sherpa-onnx 1.13.8 C API via `libloading` and runs inside `bwrap --unshare-net --unshare-pid`. |
-| Model | `parakeet-unified-en-int8`: an offline transducer. Files: encoder 623.7 MB, decoder 6.9 MB, joiner 1.7 MB, `bpe.vocab`, `tokens.txt`. CPU only; threads = `min(cpus, 4)`. |
-| Decoding | `greedy_search` by default. With vocabulary boosting on: `modified_beam_search`, `max_active_paths = 4`, hotwords file, score 0.5–3 (default 1.5). |
-| VAD | Optional Silero, run on the whole recording after capture: threshold 0.3, min silence 0.45 s, min speech 0.06 s, max speech 30 s. Padding 450 ms before and 200 ms after. If no speech is found, all audio is decoded. |
-| Denoise | Optional GTCRN offline denoiser before VAD. |
-| Long audio | Splits at energy-based pauses into pieces of at most 15 s (`src/segments.rs`). Pieces are decoded one after another (`src/backend.rs`). Hard cap 300 s. |
-| Lifecycle | Model loads on first use. Idle unload after 0/5/10/15/30/60 minutes. Cancellation by epoch. Loaded process-tree PSS is about 1.44 GB; model-free about 28 MB. |
-| Cleanup | Filler removal, user corrections (`a -> b`), optional repetition removal (`src/cleanup.rs`). Fuzzy vocabulary matching uses Soundex and Levenshtein with tolerance 0.18. Case is preserved. |
-| Vocabulary | Hotwords are converted to SentencePiece BPE. Words beginning with `:` are dropped (`src/vocabulary.rs:100`). |
-| Output | `wl-copy` plus `wtype` Ctrl+V (Shift+Insert in terminals). The clipboard is restored after 800 ms, guarded by a generation counter. Also: niri focus check, PRIMARY selection, optional trailing space and Enter (`src/output.rs`). |
-| Control | GApplication D-Bus actions `toggle` and `cancel`, bound in niri (`docs/niri.kdl`). Toggle only, no push-to-talk. |
-| UI | GTK4 layer-shell overlay and notch, and a settings window. A "Copy original" action recovers the text before cleanup. |
-| Evaluation | The Rust and Python word-level evaluators used an 88-word smoke corpus. |
+| Area       | Current implementation                                                                                                                                                                                                              |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Capture    | `pw-record --raw` s16, 16 kHz mono (`src/audio.rs`). 1 s pre-roll ring, optional keep-mic-ready, 5 s first-audio timeout, level meter.                                                                                              |
+| Recognizer | Separate `hype-flow-recognizer` process (`worker/src/main.rs`). It loads the sherpa-onnx 1.13.8 C API via `libloading` and runs inside `bwrap --unshare-net --unshare-pid`.                                                         |
+| Model      | `parakeet-unified-en-int8`: an offline transducer. Files: encoder 623.7 MB, decoder 6.9 MB, joiner 1.7 MB, `bpe.vocab`, `tokens.txt`. CPU only; threads = `min(cpus, 4)`.                                                           |
+| Decoding   | `greedy_search` by default. With vocabulary boosting on: `modified_beam_search`, `max_active_paths = 4`, hotwords file, score 0.5–3 (default 1.5).                                                                                  |
+| VAD        | Optional Silero, run on the whole recording after capture: threshold 0.3, min silence 0.45 s, min speech 0.06 s, max speech 30 s. Padding 450 ms before and 200 ms after. If no speech is found, all audio is decoded.              |
+| Denoise    | Optional GTCRN offline denoiser before VAD.                                                                                                                                                                                         |
+| Long audio | Splits at energy-based pauses into pieces of at most 15 s (`src/segments.rs`). Pieces are decoded one after another (`src/backend.rs`). Hard cap 300 s.                                                                             |
+| Lifecycle  | Model loads on first use. Idle unload after 0/5/10/15/30/60 minutes. Cancellation by epoch. Loaded process-tree PSS is about 1.44 GB; model-free about 28 MB.                                                                       |
+| Cleanup    | Filler removal, user corrections (`a -> b`), optional repetition removal (`src/cleanup.rs`). Fuzzy vocabulary matching uses Soundex and Levenshtein with tolerance 0.18. Case is preserved.                                         |
+| Vocabulary | Hotwords are converted to SentencePiece BPE. Words beginning with `:` are dropped (`src/vocabulary.rs:100`).                                                                                                                        |
+| Output     | `wl-copy` plus `wtype` Ctrl+V (Shift+Insert in terminals). The clipboard is restored after 800 ms, guarded by a generation counter. Also: niri focus check, PRIMARY selection, optional trailing space and Enter (`src/output.rs`). |
+| Control    | GApplication D-Bus actions `toggle` and `cancel`, bound in niri (`docs/niri.kdl`). Toggle only, no push-to-talk.                                                                                                                    |
+| UI         | GTK4 layer-shell overlay and notch, and a settings window. A "Copy original" action recovers the text before cleanup.                                                                                                               |
+| Evaluation | The Rust and Python word-level evaluators used an 88-word smoke corpus.                                                                                                                                                             |
 
 Missing at this checkpoint:
 
@@ -212,34 +212,34 @@ Handy's comments report retained memory falling from about 15 MB to 0.5 MB per
 
 ### 4.8 Smaller gaps
 
-| Gap | Evidence | Reference |
-|---|---|---|
-| No minimum recording length | none found in `src/` | Sayso `MinDurationMs: 300`; Sussurro 300 ms; OpenSuperWhisper 1.0 s |
-| `<unk>` and punctuation-only output not filtered | no `<unk>` handling in `src/` or `worker/src` | Vocalinux `_filter_non_speech`; Handy `transcription.rs:1745-1750` |
-| VAD segments are concatenated with no gap | `worker/src/main.rs:380-394` | whisper.cpp inserts 0.1 s of zeros between segments |
-| Fixed 180 ms sleep before paste | `src/output.rs:343` | Voxtype `modifier_guard.rs`; OpenWhispr `MODIFIER_RELEASE_WAIT_MS = 1500` via `EVIOCGKEY` |
-| VAD buffer sized for 300 s | `SherpaOnnxCreateVoiceActivityDetector(&config, 300.0)` | `CircularBuffer` zero-fills its capacity, about 19 MB; about 40 s is enough |
-| `remove_repetitions` collapses legitimate doubles | `src/cleanup.rs:340` | Voxtype `LEGITIMATE_DOUBLES = ["had","that","very","no","yes","ha","so"]` |
-| No warm-up decode | the worker reports ready right after `Decoder::new` | OpenWhispr decodes 1 s of silence first (`parakeetWsServer.js:416-428`) |
-| Failed recordings are not kept | only "Copy original" for text | Voxtype `failed_recording.rs` keeps 20 WAVs; OpenWhispr crash spool |
+| Gap                                               | Evidence                                                | Reference                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| No minimum recording length                       | none found in `src/`                                    | Sayso `MinDurationMs: 300`; Sussurro 300 ms; OpenSuperWhisper 1.0 s                       |
+| `<unk>` and punctuation-only output not filtered  | no `<unk>` handling in `src/` or `worker/src`           | Vocalinux `_filter_non_speech`; Handy `transcription.rs:1745-1750`                        |
+| VAD segments are concatenated with no gap         | `worker/src/main.rs:380-394`                            | whisper.cpp inserts 0.1 s of zeros between segments                                       |
+| Fixed 180 ms sleep before paste                   | `src/output.rs:343`                                     | Voxtype `modifier_guard.rs`; OpenWhispr `MODIFIER_RELEASE_WAIT_MS = 1500` via `EVIOCGKEY` |
+| VAD buffer sized for 300 s                        | `SherpaOnnxCreateVoiceActivityDetector(&config, 300.0)` | `CircularBuffer` zero-fills its capacity, about 19 MB; about 40 s is enough               |
+| `remove_repetitions` collapses legitimate doubles | `src/cleanup.rs:340`                                    | Voxtype `LEGITIMATE_DOUBLES = ["had","that","very","no","yes","ha","so"]`                 |
+| No warm-up decode                                 | the worker reports ready right after `Decoder::new`     | OpenWhispr decodes 1 s of silence first (`parakeetWsServer.js:416-428`)                   |
+| Failed recordings are not kept                    | only "Copy original" for text                           | Voxtype `failed_recording.rs` keeps 20 WAVs; OpenWhispr crash spool                       |
 
 ---
 
 ## 5. Where Hype Flow already matches or leads
 
-| Area | Hype Flow | Reference comparison |
-|---|---|---|
-| Fuzzy vocabulary algorithm | Near line-for-line port of Handy's `apply_custom_words`: same 0.18 tolerance, 0.25 length gate, Soundex × 0.3, 3-grams, `&` expansion | Equal to Handy. Voxtype is stricter (see 4.1) |
-| Clipboard restore | Generation counter plus a check that the clipboard still holds the transcript; typed restore; `--sensitive` | Equal to Voxtype's "newer copy wins" and OpenSuperWhisper's `changeCount` |
-| Paste key per app | Shift+Insert for terminals, keyed by niri `app_id` | Equal to Voxtype `paste.rs`. The OpenWhispr terminal list (30 classes) is longer and worth syncing |
-| Worker isolation | Separate process, `bwrap --unshare-net --unshare-pid` | Handy and Voxtype also isolate workers; none deny network as strictly |
-| Control IPC | GApplication D-Bus actions from niri binds | Cleaner than Voxtype's SIGUSR plus override files and Sussurro's socket |
-| Vocabulary on sherpa models | Hotwords plus beam search | Sayso and Vocalinux ignore the dictionary on sherpa models |
-| Punctuation and case | Parakeet emits `, . ? !` and capitals (106 capitalised tokens) | No punctuation model needed; Voxtype uses one only for CTC engines |
-| Noise suppression | GTCRN | Same as Voxtype `enhance.rs` |
-| Idle unload | Configurable minutes | Equal to Handy and Vocalinux keepalive |
-| Hotword sanitising | Drops words starting with `:` | Equal to OpenWhispr. The 100-word cap and case-insensitive dedupe are not yet present |
-| Hook | `hook.rs`, 30 s timeout | Equal to the Vocalinux post-processor script |
+| Area                        | Hype Flow                                                                                                                             | Reference comparison                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Fuzzy vocabulary algorithm  | Near line-for-line port of Handy's `apply_custom_words`: same 0.18 tolerance, 0.25 length gate, Soundex × 0.3, 3-grams, `&` expansion | Equal to Handy. Voxtype is stricter (see 4.1)                                                      |
+| Clipboard restore           | Generation counter plus a check that the clipboard still holds the transcript; typed restore; `--sensitive`                           | Equal to Voxtype's "newer copy wins" and OpenSuperWhisper's `changeCount`                          |
+| Paste key per app           | Shift+Insert for terminals, keyed by niri `app_id`                                                                                    | Equal to Voxtype `paste.rs`. The OpenWhispr terminal list (30 classes) is longer and worth syncing |
+| Worker isolation            | Separate process, `bwrap --unshare-net --unshare-pid`                                                                                 | Handy and Voxtype also isolate workers; none deny network as strictly                              |
+| Control IPC                 | GApplication D-Bus actions from niri binds                                                                                            | Cleaner than Voxtype's SIGUSR plus override files and Sussurro's socket                            |
+| Vocabulary on sherpa models | Hotwords plus beam search                                                                                                             | Sayso and Vocalinux ignore the dictionary on sherpa models                                         |
+| Punctuation and case        | Parakeet emits `, . ? !` and capitals (106 capitalised tokens)                                                                        | No punctuation model needed; Voxtype uses one only for CTC engines                                 |
+| Noise suppression           | GTCRN                                                                                                                                 | Same as Voxtype `enhance.rs`                                                                       |
+| Idle unload                 | Configurable minutes                                                                                                                  | Equal to Handy and Vocalinux keepalive                                                             |
+| Hotword sanitising          | Drops words starting with `:`                                                                                                         | Equal to OpenWhispr. The 100-word cap and case-insensitive dedupe are not yet present              |
+| Hook                        | `hook.rs`, 30 s timeout                                                                                                               | Equal to the Vocalinux post-processor script                                                       |
 
 ---
 
@@ -362,17 +362,17 @@ Effort: S is under a day, M is a few days, L is a week or more.
 
 **11. Decoder and runtime sweep.** Effort S each, after item 9.
 
-| Setting | Values to test | Notes |
-|---|---|---|
-| `blank_penalty` | 0, 0.5, 1.0, 2.0 | Already in `bindings.rs:517`. Applied by both the greedy and beam NeMo decoders when > 0. Lowers deletions and may raise insertions |
-| Hotwords | off (greedy) / 1.5 / 3 | If there is no keyword-F1 gain, default to greedy and rely on the fixed fuzzy layer |
-| Per-term hotword score | `term :2.5` per line | sherpa `utils.cc:52-55` |
-| Hotword cap | 100 terms, case-insensitive dedupe | OpenWhispr `MAX_SHERPA_HOTWORDS` |
-| `max_active_paths` | 4 vs 8 | Beam only |
-| Threads | 4, 6, 8 | Core Ultra 9 185H P-core/E-core placement |
-| ORT session options | `provider = "cpu:<model>/session.cfg"` with `EnableCpuMemArena=0`, `EnableMemPattern=0`, optionally `SessionConfig.session.disable_prepacking=1` | Parsed by sherpa `session.cc:85-226`. Test each line separately for PSS and latency. The file must be inside the bwrap-visible model directory |
-| Max piece length | 15 s vs 30 s vs 60 s | Sayso uses 60 s for Parakeet TDT; Handy targets 30 s with a 40 s maximum. Fewer cuts may improve WER; check peak PSS |
-| Silero model | current k2 export (v4 IO names) vs upstream 6.2.3 `silero_vad.onnx` | sherpa selects v5 handling for 3-input/2-output models (`silero-vad-model.cc:208-216`). Window must stay 512 |
+| Setting                | Values to test                                                                                                                                   | Notes                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blank_penalty`        | 0, 0.5, 1.0, 2.0                                                                                                                                 | Already in `bindings.rs:517`. Applied by both the greedy and beam NeMo decoders when > 0. Lowers deletions and may raise insertions            |
+| Hotwords               | off (greedy) / 1.5 / 3                                                                                                                           | If there is no keyword-F1 gain, default to greedy and rely on the fixed fuzzy layer                                                            |
+| Per-term hotword score | `term :2.5` per line                                                                                                                             | sherpa `utils.cc:52-55`                                                                                                                        |
+| Hotword cap            | 100 terms, case-insensitive dedupe                                                                                                               | OpenWhispr `MAX_SHERPA_HOTWORDS`                                                                                                               |
+| `max_active_paths`     | 4 vs 8                                                                                                                                           | Beam only                                                                                                                                      |
+| Threads                | 4, 6, 8                                                                                                                                          | Core Ultra 9 185H P-core/E-core placement                                                                                                      |
+| ORT session options    | `provider = "cpu:<model>/session.cfg"` with `EnableCpuMemArena=0`, `EnableMemPattern=0`, optionally `SessionConfig.session.disable_prepacking=1` | Parsed by sherpa `session.cc:85-226`. Test each line separately for PSS and latency. The file must be inside the bwrap-visible model directory |
+| Max piece length       | 15 s vs 30 s vs 60 s                                                                                                                             | Sayso uses 60 s for Parakeet TDT; Handy targets 30 s with a 40 s maximum. Fewer cuts may improve WER; check peak PSS                           |
+| Silero model           | current k2 export (v4 IO names) vs upstream 6.2.3 `silero_vad.onnx`                                                                              | sherpa selects v5 handling for 3-input/2-output models (`silero-vad-model.cc:208-216`). Window must stay 512                                   |
 
 **12. Decode while recording.** Effort M. Largest latency win.
 
@@ -386,12 +386,12 @@ Effort: S is under a day, M is a few days, L is a week or more.
 - Estimate: stop-to-text latency becomes about one segment's decode,
   independent of total length.
 
-| Project | Approach | Key values |
-|---|---|---|
-| Handy `chunking.rs` | VAD-scored cuts | target 30 s, max 40 s, min 5 s, lookahead 5 s; Silero 0.5 / neg 0.35, min speech 250 ms, min silence 100 ms, pad 30 ms |
-| Voxtype `eager.rs` | Quiet-frame cuts | `eager_chunk_secs 5.0`; cut at the quietest 20 ms frame within 1.5 s |
-| Vocalinux `recognition_manager.py:4270-4335` | Silence timeout | `silence_timeout 1.2` s, chosen so no LibriSpeech sentence was cut; `max_segment_seconds 90` |
-| sherpa main `rust-api-examples/parakeet_tdt_simulate_streaming_microphone.rs` | Simulated streaming | Reference implementation |
+| Project                                                                       | Approach            | Key values                                                                                                             |
+| ----------------------------------------------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Handy `chunking.rs`                                                           | VAD-scored cuts     | target 30 s, max 40 s, min 5 s, lookahead 5 s; Silero 0.5 / neg 0.35, min speech 250 ms, min silence 100 ms, pad 30 ms |
+| Voxtype `eager.rs`                                                            | Quiet-frame cuts    | `eager_chunk_secs 5.0`; cut at the quietest 20 ms frame within 1.5 s                                                   |
+| Vocalinux `recognition_manager.py:4270-4335`                                  | Silence timeout     | `silence_timeout 1.2` s, chosen so no LibriSpeech sentence was cut; `max_segment_seconds 90`                           |
+| sherpa main `rust-api-examples/parakeet_tdt_simulate_streaming_microphone.rs` | Simulated streaming | Reference implementation                                                                                               |
 
 Optional live preview, from Sayso `internal/localengine/redecode.go`:
 
@@ -502,12 +502,12 @@ For Hype Flow:
 
 **20. Alternative models and backends.** Effort M–L. Measure WER first.
 
-| Option | Benefit | Cost |
-|---|---|---|
-| Underdog Bark 3.0 int4, 379 MB (Vocalinux `parakeet_model_info.py`) | About half the model RAM | Accuracy unknown |
-| Parakeet TDT 110M EN, 136 MB, punctuated (OpenWhispr catalog) | Ultra-light profile | Lower accuracy expected |
-| whisper.cpp native Parakeet (`include/parakeet.h`, `scripts/quantize-parakeet.sh`: q8_0/q4_0/q4_k/q2_k; Vulkan backends) | Lower PSS, iGPU speed (estimate) | Greedy only, no hotwords |
-| OpenVINO EP on the NPU/Arc iGPU (`session.cc:459-505`; `/dev/accel/accel0` present) | Encoder speed-up (estimate) | Needs an ORT build with the OpenVINO EP plus the OpenVINO runtime; the shipped runtime has only `libonnxruntime.so` |
+| Option                                                                                                                   | Benefit                          | Cost                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Underdog Bark 3.0 int4, 379 MB (Vocalinux `parakeet_model_info.py`)                                                      | About half the model RAM         | Accuracy unknown                                                                                                    |
+| Parakeet TDT 110M EN, 136 MB, punctuated (OpenWhispr catalog)                                                            | Ultra-light profile              | Lower accuracy expected                                                                                             |
+| whisper.cpp native Parakeet (`include/parakeet.h`, `scripts/quantize-parakeet.sh`: q8_0/q4_0/q4_k/q2_k; Vulkan backends) | Lower PSS, iGPU speed (estimate) | Greedy only, no hotwords                                                                                            |
+| OpenVINO EP on the NPU/Arc iGPU (`session.cc:459-505`; `/dev/accel/accel0` present)                                      | Encoder speed-up (estimate)      | Needs an ORT build with the OpenVINO EP plus the OpenVINO runtime; the shipped runtime has only `libonnxruntime.so` |
 
 **21. Upgrade sherpa-onnx to main (2.0.3).** Effort M.
 
@@ -566,21 +566,21 @@ the 624 MB model. Beam search only.
 
 ## 7. Not recommended
 
-| Item | Reason |
-|---|---|
-| Whisper hallucination thresholds (`no_speech_thold`, `logprob_thold`, `entropy_thold`, compression ratio, temperature fallback), initial prompts, `[BLANK_AUDIO]` and vocabulary-echo filters | Specific to autoregressive Whisper; Parakeet transducers have no prompt |
-| True streaming Parakeet Unified (`online-recognizer-transducer-nemo-parakeet-unified-impl.h`) | Each chunk re-encodes about 70 left-context frames (5.6 s). With the 1120 ms preset that is about 12× offline compute (estimate). Greedy only, so hotwords are lost. Needs a separate ~630 MB streaming package |
-| sherpa punctuation models (`ct_transformer`, `cnn_bilstm`) | Parakeet already emits punctuation and case |
-| sherpa `rule_fsts` for English ITN | Only `itn_zh_number.fst` ships; compiling NeMo grammars for sherpa is unverified |
-| Homophone replacer | Chinese only; ASCII words pass through (`homophone-replacer.cc:170-180`) |
-| LM shallow fusion, `temperature` | Not used by the NeMo transducer path |
-| `SherpaOnnxOfflineRecognizerSetConfig` | No effect for the NeMo implementation, which keeps its own config (`offline-recognizer-impl.cc:935`) |
-| cpal / rubato / custom resamplers | `pw-record` already delivers 16 kHz mono |
-| Voxtype signal-and-file IPC, Sussurro socket | GApplication actions are cleaner |
-| Per-app profiles | Voxtype selects profiles only by CLI flag; there is little evidence of value |
-| whisperX forced alignment | TDT/RNNT already gives token timestamps |
-| Voxtype disfluency tagger | Requires their trained `VXDFL001` weights |
-| Separate streaming preview model (Sayso Kroko) | A second model costs RAM; the re-decode preview reuses the main model |
+| Item                                                                                                                                                                                          | Reason                                                                                                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Whisper hallucination thresholds (`no_speech_thold`, `logprob_thold`, `entropy_thold`, compression ratio, temperature fallback), initial prompts, `[BLANK_AUDIO]` and vocabulary-echo filters | Specific to autoregressive Whisper; Parakeet transducers have no prompt                                                                                                                                         |
+| True streaming Parakeet Unified (`online-recognizer-transducer-nemo-parakeet-unified-impl.h`)                                                                                                 | Each chunk re-encodes about 70 left-context frames (5.6 s). With the 1120 ms preset that is about 12× offline compute (estimate). Greedy only, so hotwords are lost. Needs a separate ~630 MB streaming package |
+| sherpa punctuation models (`ct_transformer`, `cnn_bilstm`)                                                                                                                                    | Parakeet already emits punctuation and case                                                                                                                                                                     |
+| sherpa `rule_fsts` for English ITN                                                                                                                                                            | Only `itn_zh_number.fst` ships; compiling NeMo grammars for sherpa is unverified                                                                                                                                |
+| Homophone replacer                                                                                                                                                                            | Chinese only; ASCII words pass through (`homophone-replacer.cc:170-180`)                                                                                                                                        |
+| LM shallow fusion, `temperature`                                                                                                                                                              | Not used by the NeMo transducer path                                                                                                                                                                            |
+| `SherpaOnnxOfflineRecognizerSetConfig`                                                                                                                                                        | No effect for the NeMo implementation, which keeps its own config (`offline-recognizer-impl.cc:935`)                                                                                                            |
+| cpal / rubato / custom resamplers                                                                                                                                                             | `pw-record` already delivers 16 kHz mono                                                                                                                                                                        |
+| Voxtype signal-and-file IPC, Sussurro socket                                                                                                                                                  | GApplication actions are cleaner                                                                                                                                                                                |
+| Per-app profiles                                                                                                                                                                              | Voxtype selects profiles only by CLI flag; there is little evidence of value                                                                                                                                    |
+| whisperX forced alignment                                                                                                                                                                     | TDT/RNNT already gives token timestamps                                                                                                                                                                         |
+| Voxtype disfluency tagger                                                                                                                                                                     | Requires their trained `VXDFL001` weights                                                                                                                                                                       |
+| Separate streaming preview model (Sayso Kroko)                                                                                                                                                | A second model costs RAM; the re-decode preview reuses the main model                                                                                                                                           |
 
 ---
 
@@ -590,57 +590,57 @@ the 624 MB model. Beam search only.
 
 Relevant files (`src-tauri/src/`):
 
-| File | Content | Relevance |
-|---|---|---|
-| `audio_toolkit/text.rs` | Fuzzy custom words, filler removal, stutter collapse | Hype Flow's matcher is a port. New: universal vs language-gated fillers, capital handoff |
-| `audio_toolkit/vad/{mod,smoothed,silero,earshot}.rs` | Per-frame VAD during capture: prefill 450 ms, hangover 450 ms, onset 60 ms, Silero 0.3 | Needed for item 12 |
-| `audio_toolkit/chunking.rs` | VAD-scored cut planner (constants in item 12) | Item 12 |
-| `audio_toolkit/audio/sink.rs` | Inline VAD, digital-silence detection | Hype Flow has silent-mic detection |
-| `managers/audio.rs` | Mic lifecycle, mute while recording (`wpctl set-mute`), `extra_recording_buffer_ms` (default 0) | Optional |
-| `managers/transcription.rs`, `transcription/{policy,live,chunked,job}.rs` | Decode policy, live decode, idle unload, punctuation-only result → empty (`:1745-1750`), `catch_unwind` fallback to raw text (`:1782`) | Items 2, 12 |
-| `managers/history.rs`, `commands/history.rs` | SQLite history plus WAV, retry, retention | Item 19 |
-| `memory.rs` | `mallopt` / `malloc_trim` | Item 5 |
-| `transcription_coordinator.rs`, `shortcut/*` | Toggle / push-to-talk / hold-or-toggle (hold 300 ms, grace 50 ms, debounce 30 ms) | Item 18 |
-| `llm_client.rs`, `settings.rs` | LLM cleanup: 60 s timeout falls back to raw text; JSON schema `{transcription}`; `<think>` stripping | Item 22 |
-| `cli.rs` | `--transcribe-file`, `--repeat N` headless benchmark | Hype Flow has `evaluate.rs` |
-| `utils.rs` `redact_text` | Transcript redaction in release logs | Check Hype Flow app logs |
-| `catalog.json` | parakeet-unified-en-0.6b FLEURS en 3.99 % WER, CPU 13.955 (unit assumed ×real-time) | Confirms the model choice |
+| File                                                                      | Content                                                                                                                                | Relevance                                                                                |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `audio_toolkit/text.rs`                                                   | Fuzzy custom words, filler removal, stutter collapse                                                                                   | Hype Flow's matcher is a port. New: universal vs language-gated fillers, capital handoff |
+| `audio_toolkit/vad/{mod,smoothed,silero,earshot}.rs`                      | Per-frame VAD during capture: prefill 450 ms, hangover 450 ms, onset 60 ms, Silero 0.3                                                 | Needed for item 12                                                                       |
+| `audio_toolkit/chunking.rs`                                               | VAD-scored cut planner (constants in item 12)                                                                                          | Item 12                                                                                  |
+| `audio_toolkit/audio/sink.rs`                                             | Inline VAD, digital-silence detection                                                                                                  | Hype Flow has silent-mic detection                                                       |
+| `managers/audio.rs`                                                       | Mic lifecycle, mute while recording (`wpctl set-mute`), `extra_recording_buffer_ms` (default 0)                                        | Optional                                                                                 |
+| `managers/transcription.rs`, `transcription/{policy,live,chunked,job}.rs` | Decode policy, live decode, idle unload, punctuation-only result → empty (`:1745-1750`), `catch_unwind` fallback to raw text (`:1782`) | Items 2, 12                                                                              |
+| `managers/history.rs`, `commands/history.rs`                              | SQLite history plus WAV, retry, retention                                                                                              | Item 19                                                                                  |
+| `memory.rs`                                                               | `mallopt` / `malloc_trim`                                                                                                              | Item 5                                                                                   |
+| `transcription_coordinator.rs`, `shortcut/*`                              | Toggle / push-to-talk / hold-or-toggle (hold 300 ms, grace 50 ms, debounce 30 ms)                                                      | Item 18                                                                                  |
+| `llm_client.rs`, `settings.rs`                                            | LLM cleanup: 60 s timeout falls back to raw text; JSON schema `{transcription}`; `<think>` stripping                                   | Item 22                                                                                  |
+| `cli.rs`                                                                  | `--transcribe-file`, `--repeat N` headless benchmark                                                                                   | Hype Flow has `evaluate.rs`                                                              |
+| `utils.rs` `redact_text`                                                  | Transcript redaction in release logs                                                                                                   | Check Hype Flow app logs                                                                 |
+| `catalog.json`                                                            | parakeet-unified-en-0.6b FLEURS en 3.99 % WER, CPU 13.955 (unit assumed ×real-time)                                                    | Confirms the model choice                                                                |
 
 Skipped: the TSX UI (grepped only), generated bindings, Nix, workflows, NSIS,
 icons, overlay, tray, macOS/Windows paste, language ID.
 
 ### 8.2 OpenSuperWhisper (Swift, macOS)
 
-| File | Content | Relevance |
-|---|---|---|
-| `Engines/WhisperEngine.swift` | VAD gate: no speech → empty (`:195-200`); segment stitching with 0.1 s overlap plus 0.1 s zeros (`:387-410`) | Items 2, 6 |
-| `Engines/FluidAudioEngine.swift` | Parakeet v2/v3 via CoreML, fresh decoder state per run | Hype Flow equivalent: a fresh offline stream per run |
-| `AudioRecorder.swift` | Stop tail 0.25 s (`:19,240`), minimum duration 1.0 s (`:15,255`) | Items 2, 7 |
-| `Indicator/IndicatorWindow.swift`, `TranscriptionQueue.swift`, `Models/Recording.swift` | Queue dictation when busy; keep failed audio | Items 8, 19 |
-| `OpenSuperWhisperTests/LongFormTranscriptionTests.swift` | Checkpoint phrases near 30/60/90 s | Item 9 |
+| File                                                                                    | Content                                                                                                      | Relevance                                            |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `Engines/WhisperEngine.swift`                                                           | VAD gate: no speech → empty (`:195-200`); segment stitching with 0.1 s overlap plus 0.1 s zeros (`:387-410`) | Items 2, 6                                           |
+| `Engines/FluidAudioEngine.swift`                                                        | Parakeet v2/v3 via CoreML, fresh decoder state per run                                                       | Hype Flow equivalent: a fresh offline stream per run |
+| `AudioRecorder.swift`                                                                   | Stop tail 0.25 s (`:19,240`), minimum duration 1.0 s (`:15,255`)                                             | Items 2, 7                                           |
+| `Indicator/IndicatorWindow.swift`, `TranscriptionQueue.swift`, `Models/Recording.swift` | Queue dictation when busy; keep failed audio                                                                 | Items 8, 19                                          |
+| `OpenSuperWhisperTests/LongFormTranscriptionTests.swift`                                | Checkpoint phrases near 30/60/90 s                                                                           | Item 9                                               |
 
 Skipped: the whisper.cpp and asian-autocorrect submodules, xcodeproj, model
 binary, `agent/` (an issue bot), and the macOS-only monitors.
 
 ### 8.3 OpenWhispr (Electron)
 
-| File | Content | Relevance |
-|---|---|---|
-| `src/utils/sherpaHotwords.js` | Per-model hotword scores; Unified disabled; 100 cap; `:` filter; dedupe | Item 11, defect 4.4 |
-| `src/helpers/localSpeechGate.js`, `audioManager.js:1729-1748,2350-2370` | RMS/peak speech gate | Item 2 |
-| `src/helpers/parakeetServer.js` | `SILENCE_RMS_THRESHOLD = 0.001`, empty-decode retry, parallel segments | Items 2, 23 |
-| `src/helpers/parakeetWsServer.js` | Thread formula, warm-up decode (`:416-428`), hotwords file | Items 4, 23 |
-| `src/helpers/parakeetSegmentation.js` | Pause splitter | Already ported as `segments.rs` |
-| `model-registry/registry/parakeet.json` | TDT-0.6b-v3, unified-en, TDT-110m-en, Nemotron streaming (560 ms), Orukeet | Item 20 |
-| `src/utils/correctionLearner.js`, `textEditMonitor.js`, `resources/linux-text-monitor.c` | Auto-learn from edits | Item 17 |
-| `src/helpers/clipboard.js`, `resources/linux-fast-paste.c` | Restore delays (Linux 800 ms, KDE Wayland 1200 ms), terminal list, modifier wait 1500 ms | Item 15 |
-| `resources/linux-key-listener.c`, `hyprlandShortcut.js:700`, `hotkeyRepeatGate.js` | evdev push-to-talk; Hyprland `bindrt`; 600 ms repeat gate | Item 18 |
-| `src/helpers/recordingSpool.js`, `retentionSettings.js`, `discardedRecording.js` | Crash spool, 30-day audio retention, discarded takes | Item 19 |
-| `transcriptionTimeout.js` | Timeout floor 300,000 ms plus 10,000 ms per audio second | Low priority; Hype Flow has a flat 600 s |
-| `cleanupOutput.ts`, `config/prompts/index.ts:41` | LLM output guards | Item 22 |
-| `src/utils/snippets.ts` | Spoken trigger expansion | Covered by corrections |
-| `whisperVadConfig.js` | Dictation VAD off by default; Silero 0.5 / 250 / 200 / 30 s / pad 100 ms | Data point |
-| `settingsStore.ts:1941` | `telemetryEnabled` false by default | Hype Flow is offline |
+| File                                                                                     | Content                                                                                  | Relevance                                |
+| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `src/utils/sherpaHotwords.js`                                                            | Per-model hotword scores; Unified disabled; 100 cap; `:` filter; dedupe                  | Item 11, defect 4.4                      |
+| `src/helpers/localSpeechGate.js`, `audioManager.js:1729-1748,2350-2370`                  | RMS/peak speech gate                                                                     | Item 2                                   |
+| `src/helpers/parakeetServer.js`                                                          | `SILENCE_RMS_THRESHOLD = 0.001`, empty-decode retry, parallel segments                   | Items 2, 23                              |
+| `src/helpers/parakeetWsServer.js`                                                        | Thread formula, warm-up decode (`:416-428`), hotwords file                               | Items 4, 23                              |
+| `src/helpers/parakeetSegmentation.js`                                                    | Pause splitter                                                                           | Already ported as `segments.rs`          |
+| `model-registry/registry/parakeet.json`                                                  | TDT-0.6b-v3, unified-en, TDT-110m-en, Nemotron streaming (560 ms), Orukeet               | Item 20                                  |
+| `src/utils/correctionLearner.js`, `textEditMonitor.js`, `resources/linux-text-monitor.c` | Auto-learn from edits                                                                    | Item 17                                  |
+| `src/helpers/clipboard.js`, `resources/linux-fast-paste.c`                               | Restore delays (Linux 800 ms, KDE Wayland 1200 ms), terminal list, modifier wait 1500 ms | Item 15                                  |
+| `resources/linux-key-listener.c`, `hyprlandShortcut.js:700`, `hotkeyRepeatGate.js`       | evdev push-to-talk; Hyprland `bindrt`; 600 ms repeat gate                                | Item 18                                  |
+| `src/helpers/recordingSpool.js`, `retentionSettings.js`, `discardedRecording.js`         | Crash spool, 30-day audio retention, discarded takes                                     | Item 19                                  |
+| `transcriptionTimeout.js`                                                                | Timeout floor 300,000 ms plus 10,000 ms per audio second                                 | Low priority; Hype Flow has a flat 600 s |
+| `cleanupOutput.ts`, `config/prompts/index.ts:41`                                         | LLM output guards                                                                        | Item 22                                  |
+| `src/utils/snippets.ts`                                                                  | Spoken trigger expansion                                                                 | Covered by corrections                   |
+| `whisperVadConfig.js`                                                                    | Dictation VAD off by default; Silero 0.5 / 250 / 200 / 30 s / pad 100 ms                 | Data point                               |
+| `settingsStore.ts:1941`                                                                  | `telemetryEnabled` false by default                                                      | Hype Flow is offline                     |
 
 Skipped: `openwhispr-mobile/` (998 files), `src/components/` (593 files),
 cloud/enterprise/account/billing, connectors, meetings and diarization,
@@ -648,28 +648,28 @@ notes/agents, native macOS/Windows, docs, most tests.
 
 ### 8.4 Voxtype (Rust, Linux/Wayland)
 
-| File | Content | Relevance |
-|---|---|---|
-| `src/text/mod.rs` | Cleanup order: vocab, filler, replacements, spoken punctuation, disfluency, restarts, punctuation model, sentence repair, ITN, replacements again, smart submit | Order reference |
-| `src/text/itn.rs` | Conservative ITN (`:84-87,109-131,135-147,262-288`) | Item 13 |
-| `src/text/vocabulary.rs` | Strict DoubleMetaphone fuzzy gate | Item 1 |
-| `src/text/restarts.rs` | Restart and stutter removal (`:26-66`) | Item 14 |
-| `src/text/sentences.rs` | Break repair, `?` decision | Item 14 |
-| `src/transcribe/parakeet.rs`, `config/engines/parakeet.rs` | parakeet-rs; `max_window_secs 240` (TDT attention aborts near 295 s); overlap 5.0; streaming chunk 0.5 / left 1.5 / right 0.5 | Reference; Hype Flow's 15 s cuts are safe |
-| `src/transcribe/window.rs` | Overlap windows plus word-overlap stitch | Alternative to pause cuts |
-| `src/eager.rs` | Eager chunk transcription | Item 12 |
-| `src/vad/energy.rs`, `src/config/vad.rs` | Adaptive energy VAD and silence gate | Item 2 |
-| `src/audio/input_guard.rs` | Dead-mic detection (150 Hz high-pass, dBFS) | Hype Flow has partial coverage |
-| `src/output/modifier_guard.rs` | EVIOCGKEY modifier wait, 15 ms poll | Item 15 |
-| `src/output/clipboard_restore.rs` | 2 s read deadline, process-group kill, newer copy wins | Equal to Hype Flow |
-| `src/output/fallback.rs` | Notifies the delivery target; keeps undelivered text | Partial |
-| `src/output/post_process.rs`, `src/llm/mod.rs` | LLM edit-list validator, 30,000 ms timeout, streaming `<think>` stripper (`:549`) | Item 22 |
-| `src/failed_recording.rs` | `KEEP = 20`, 0700/0600 | Item 8 |
-| `src/history/*` | JSONL day files, FTS, replacement suggestions (`MAX_FROM_WORDS 4`, `MAX_TO_WORDS 6`) | Item 19 |
-| `src/hotkey/evdev_listener.rs` | evdev push-to-talk with inotify hotplug | Item 18 |
-| `packaging/systemd/voxtype.service` | `PartOf/After=graphical-session.target`, `After=pipewire.service`, `Restart=on-failure`, `RestartSec=5` | Optional; Hype Flow uses niri `spawn-at-startup` |
-| `tests/fixtures/vad/*.wav` | silence_50ms, white_noise, tone_440hz, speech_quiet | Item 9 |
-| `config/text.rs:181-192` | Default fillers: uh um er ah eh hmm hm mm mhm (not "like") | Hype Flow equivalent |
+| File                                                       | Content                                                                                                                                                         | Relevance                                        |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `src/text/mod.rs`                                          | Cleanup order: vocab, filler, replacements, spoken punctuation, disfluency, restarts, punctuation model, sentence repair, ITN, replacements again, smart submit | Order reference                                  |
+| `src/text/itn.rs`                                          | Conservative ITN (`:84-87,109-131,135-147,262-288`)                                                                                                             | Item 13                                          |
+| `src/text/vocabulary.rs`                                   | Strict DoubleMetaphone fuzzy gate                                                                                                                               | Item 1                                           |
+| `src/text/restarts.rs`                                     | Restart and stutter removal (`:26-66`)                                                                                                                          | Item 14                                          |
+| `src/text/sentences.rs`                                    | Break repair, `?` decision                                                                                                                                      | Item 14                                          |
+| `src/transcribe/parakeet.rs`, `config/engines/parakeet.rs` | parakeet-rs; `max_window_secs 240` (TDT attention aborts near 295 s); overlap 5.0; streaming chunk 0.5 / left 1.5 / right 0.5                                   | Reference; Hype Flow's 15 s cuts are safe        |
+| `src/transcribe/window.rs`                                 | Overlap windows plus word-overlap stitch                                                                                                                        | Alternative to pause cuts                        |
+| `src/eager.rs`                                             | Eager chunk transcription                                                                                                                                       | Item 12                                          |
+| `src/vad/energy.rs`, `src/config/vad.rs`                   | Adaptive energy VAD and silence gate                                                                                                                            | Item 2                                           |
+| `src/audio/input_guard.rs`                                 | Dead-mic detection (150 Hz high-pass, dBFS)                                                                                                                     | Hype Flow has partial coverage                   |
+| `src/output/modifier_guard.rs`                             | EVIOCGKEY modifier wait, 15 ms poll                                                                                                                             | Item 15                                          |
+| `src/output/clipboard_restore.rs`                          | 2 s read deadline, process-group kill, newer copy wins                                                                                                          | Equal to Hype Flow                               |
+| `src/output/fallback.rs`                                   | Notifies the delivery target; keeps undelivered text                                                                                                            | Partial                                          |
+| `src/output/post_process.rs`, `src/llm/mod.rs`             | LLM edit-list validator, 30,000 ms timeout, streaming `<think>` stripper (`:549`)                                                                               | Item 22                                          |
+| `src/failed_recording.rs`                                  | `KEEP = 20`, 0700/0600                                                                                                                                          | Item 8                                           |
+| `src/history/*`                                            | JSONL day files, FTS, replacement suggestions (`MAX_FROM_WORDS 4`, `MAX_TO_WORDS 6`)                                                                            | Item 19                                          |
+| `src/hotkey/evdev_listener.rs`                             | evdev push-to-talk with inotify hotplug                                                                                                                         | Item 18                                          |
+| `packaging/systemd/voxtype.service`                        | `PartOf/After=graphical-session.target`, `After=pipewire.service`, `Restart=on-failure`, `RestartSec=5`                                                         | Optional; Hype Flow uses niri `spawn-at-startup` |
+| `tests/fixtures/vad/*.wav`                                 | silence_50ms, white_noise, tone_440hz, speech_quiet                                                                                                             | Item 9                                           |
+| `config/text.rs:181-192`                                   | Default fillers: uh um er ah eh hmm hm mm mhm (not "like")                                                                                                      | Hype Flow equivalent                             |
 
 Skipped: meeting mode, TUI/OSD/quickshell/omarchy, macOS, website, tray, setup
 and GPU probing, Dockerfiles, cloud engines, and the internals of non-Parakeet
@@ -677,48 +677,48 @@ engines. No benchmarks exist in the repository.
 
 ### 8.5 Sussurro (Go)
 
-| File | Content | Relevance |
-|---|---|---|
-| `internal/asr/whisper.go`, `vad_integration_test.go:40-94` | VAD regression tests with a real model | Item 9 |
-| `internal/pipeline/pipeline.go:150` | 300 ms "Too short to transcribe" | Item 2 |
-| `internal/llm/cleanup.go`, `llama.go` | Chunked prompts, 512-token cap, hallucination-marker stripping, seam-only punctuation repair, recapitalising at deletion seams | Items 14, 22 |
-| `internal/llm/correction.go` | Bounded LLM validator | Item 22 |
-| `internal/trigger/*` | Unix socket `$XDG_RUNTIME_DIR/sussurro.sock` with toggle/press/release/cancel | Not needed |
-| `internal/input/*` | evdev chord; ignores autorepeat value 2; prefers `/dev/input/by-id` | Item 18 |
+| File                                                       | Content                                                                                                                        | Relevance    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------ |
+| `internal/asr/whisper.go`, `vad_integration_test.go:40-94` | VAD regression tests with a real model                                                                                         | Item 9       |
+| `internal/pipeline/pipeline.go:150`                        | 300 ms "Too short to transcribe"                                                                                               | Item 2       |
+| `internal/llm/cleanup.go`, `llama.go`                      | Chunked prompts, 512-token cap, hallucination-marker stripping, seam-only punctuation repair, recapitalising at deletion seams | Items 14, 22 |
+| `internal/llm/correction.go`                               | Bounded LLM validator                                                                                                          | Item 22      |
+| `internal/trigger/*`                                       | Unix socket `$XDG_RUNTIME_DIR/sussurro.sock` with toggle/press/release/cancel                                                  | Not needed   |
+| `internal/input/*`                                         | evdev chord; ignores autorepeat value 2; prefers `/dev/input/by-id`                                                            | Item 18      |
 
 Skipped: X11 context capture, the GTK3/webview UI, packaging.
 
 ### 8.6 Vocalinux (Python)
 
-| File | Content | Relevance |
-|---|---|---|
-| `speech_recognition/recognition_manager.py` | Segment decode while recording (`:4270-4335`), non-speech filter (`:325-388`), `<unk>` strip (`:2476`), stop-sound guard, Silero threshold `0.8 − (s − 1) × 0.125` (default 0.55) | Items 2, 7, 12 |
-| `command_processor.py`, `command_phrases.py` | Voice commands; punctuation aliases in 9 languages | Item 16 |
-| `custom_dictionary.py`, `docs/CUSTOM_DICTIONARY_DESIGN.md` | Terms vs corrections; corrections before commands; "No prompt-bias API" for Parakeet | Item 16 |
-| `utils/parakeet_model_info.py` | Alternative sherpa transducers (Bark int4 379 MB, Orukeet) | Item 20 |
-| `text_injection/*` | xdotool/wtype/ydotool/IBus/portal, terminal detection, image-safe clipboard restore | Mostly covered |
-| `playback_ducker.py` | Duck to 20 % with `VOLUME_MATCH_TOLERANCE 0.015` and a crash-recovery file | Optional alternative to pausing |
-| `suspend_handler.py`, `auto_pause_monitor.py`, `model_keepalive.py` | logind `PrepareForSleep`, game pause, keepalive | Low priority |
-| `docs/benchmarks/README.md` | Why 1.2 s silence timeout | Item 12 |
+| File                                                                | Content                                                                                                                                                                           | Relevance                       |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `speech_recognition/recognition_manager.py`                         | Segment decode while recording (`:4270-4335`), non-speech filter (`:325-388`), `<unk>` strip (`:2476`), stop-sound guard, Silero threshold `0.8 − (s − 1) × 0.125` (default 0.55) | Items 2, 7, 12                  |
+| `command_processor.py`, `command_phrases.py`                        | Voice commands; punctuation aliases in 9 languages                                                                                                                                | Item 16                         |
+| `custom_dictionary.py`, `docs/CUSTOM_DICTIONARY_DESIGN.md`          | Terms vs corrections; corrections before commands; "No prompt-bias API" for Parakeet                                                                                              | Item 16                         |
+| `utils/parakeet_model_info.py`                                      | Alternative sherpa transducers (Bark int4 379 MB, Orukeet)                                                                                                                        | Item 20                         |
+| `text_injection/*`                                                  | xdotool/wtype/ydotool/IBus/portal, terminal detection, image-safe clipboard restore                                                                                               | Mostly covered                  |
+| `playback_ducker.py`                                                | Duck to 20 % with `VOLUME_MATCH_TOLERANCE 0.015` and a crash-recovery file                                                                                                        | Optional alternative to pausing |
+| `suspend_handler.py`, `auto_pause_monitor.py`, `model_keepalive.py` | logind `PrepareForSleep`, game pause, keepalive                                                                                                                                   | Low priority                    |
+| `docs/benchmarks/README.md`                                         | Why 1.2 s silence timeout                                                                                                                                                         | Item 12                         |
 
 Skipped: packaging, snap/flatpak, `install.d`, sounds, `gateway_embed`, the
 settings dialog (10k lines), tray, update checker; the 157 tests by name only.
 
 ### 8.7 Sayso (Go engine plus Rust crates; sherpa-onnx 1.13.8 C API)
 
-| File | Content | Relevance |
-|---|---|---|
-| `internal/localengine/redecode.go` | Re-decode live preview (`:12-21,163-172,329-334`) | Item 12 |
-| `internal/localengine/sherpa.go` | Offline and online recognizers; threads `min(cpu,8)` final, `min(cpu,2)` preview; streaming finish pads 2 s ("0.8 s loses the last words"); dictionary ignored on catalog models | Item 11 |
-| `internal/localengine/audio.go`, `spec.go` | Quietest-window cuts (100 ms window, 20 ms hop); Parakeet TDT chunk 60 s, cut in the quietest 200 ms window of the last 5 s | Item 11 |
-| `internal/localengine/vad.go` | Threshold 0.5, min silence 0.5, min speech 0.25, 30 s parts | Data point |
-| `internal/localengine/text.go` | Committed vs tentative partial text | Item 12 |
-| `internal/enhance/text.go` | Spoken punctuation, spelled words, `WordsHeard` (joins up to 4 spoken words, distance ≤ len/3) | Item 16 |
-| `internal/dictation/machine.go:247-341` | Undo after cancel (keeps audio) | Item 19 |
-| `internal/config/config.go:54` | `MinDurationMs: 300` | Item 2 |
-| `internal/platform/insert_linux.go:300-345` | Shift+Insert default; 50 ms wait for clipboard managers; restore after 450 ms if unchanged | Consider the 50 ms wait |
-| `docs/benchmark.md`, `scripts/benchmark/{prepare,score}.py` | 7 Open ASR sets × 200 clips, fixed seed; clips under 1 s padded; Whisper normalizer plus jiwer. Linux 7700X: Parakeet TDT v2 sherpa CPU 6.72 WER at 40×. parakeet-unified-en 6.29 (CoreML) | Item 9 |
-| `docs/cleanup-models.md` | S1-mini 484 MB / Cleanup-1 639 MB; medians 68 / 82 ms on M5 Pro | Item 22 |
+| File                                                        | Content                                                                                                                                                                                    | Relevance               |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| `internal/localengine/redecode.go`                          | Re-decode live preview (`:12-21,163-172,329-334`)                                                                                                                                          | Item 12                 |
+| `internal/localengine/sherpa.go`                            | Offline and online recognizers; threads `min(cpu,8)` final, `min(cpu,2)` preview; streaming finish pads 2 s ("0.8 s loses the last words"); dictionary ignored on catalog models           | Item 11                 |
+| `internal/localengine/audio.go`, `spec.go`                  | Quietest-window cuts (100 ms window, 20 ms hop); Parakeet TDT chunk 60 s, cut in the quietest 200 ms window of the last 5 s                                                                | Item 11                 |
+| `internal/localengine/vad.go`                               | Threshold 0.5, min silence 0.5, min speech 0.25, 30 s parts                                                                                                                                | Data point              |
+| `internal/localengine/text.go`                              | Committed vs tentative partial text                                                                                                                                                        | Item 12                 |
+| `internal/enhance/text.go`                                  | Spoken punctuation, spelled words, `WordsHeard` (joins up to 4 spoken words, distance ≤ len/3)                                                                                             | Item 16                 |
+| `internal/dictation/machine.go:247-341`                     | Undo after cancel (keeps audio)                                                                                                                                                            | Item 19                 |
+| `internal/config/config.go:54`                              | `MinDurationMs: 300`                                                                                                                                                                       | Item 2                  |
+| `internal/platform/insert_linux.go:300-345`                 | Shift+Insert default; 50 ms wait for clipboard managers; restore after 450 ms if unchanged                                                                                                 | Consider the 50 ms wait |
+| `docs/benchmark.md`, `scripts/benchmark/{prepare,score}.py` | 7 Open ASR sets × 200 clips, fixed seed; clips under 1 s padded; Whisper normalizer plus jiwer. Linux 7700X: Parakeet TDT v2 sherpa CPU 6.72 WER at 40×. parakeet-unified-en 6.29 (CoreML) | Item 9                  |
+| `docs/cleanup-models.md`                                    | S1-mini 484 MB / Cleanup-1 639 MB; medians 68 / 82 ms on M5 Pro                                                                                                                            | Item 22                 |
 
 Skipped: translations (~400 YAML), the TypeScript SDK, macOS Swift,
 Windows/macOS platform code, the extension bridge, cloud providers, UI,
@@ -726,21 +726,21 @@ packaging, release scripts.
 
 ### 8.8 sherpa-onnx 1.13.8 (pinned) and main 2.0.3
 
-| Capability | Evidence | Status in Hype Flow | Decision |
-|---|---|---|---|
-| `model_type = "nemo_transducer"` | `offline-recognizer-impl.cc:295-300` | Unset | Adopt (item 3) |
-| Provider config `"cpu:<cfg>"` | `session.cc:85-226` | Unused | Measure (item 11) |
-| `ys_log_probs`, `timestamps`, `tokens` in JSON | greedy decoder `:60-90,141-171`; `offline-stream.cc:430-510` | Ignored | Adopt (item 10) |
-| `blank_penalty` | `offline-recognizer.cc:44`; applied in greedy and beam | Field bound, 0 | Sweep (item 11) |
-| Per-stream hotwords | `c-api.h:1332` | Not bound | Maybe (item 24) |
-| `DecodeMultipleOfflineStreams` | `c-api.h:1458` | Not used | Maybe (item 23) |
-| Streaming Parakeet Unified | `online-recognizer-impl.cc:53-58,118-120`; presets 70/7/7, 70/2/5, 70/1/2 frames (`export_onnx_streaming.py:15-17`) | No | Not now |
-| Endpoint detection | `c-api.h:361-370`; defaults 2.4 / 1.2 / 20 s | No | Only with streaming |
-| Punctuation, ITN FSTs, homophone replacer, LM, temperature | See section 7 | No | Skip |
-| VAD `neg_threshold` | In C++ (`silero-vad-model-config.h:33-39`), not in the C struct | Implicit `max(thr − 0.15, 0.01)` | n/a |
-| VAD semantics | Segment start at tail − 2·window − min_speech (`voice-activity-detector.cc:95-99`); end at tail − min_silence (`:112`); above `max_speech` switches to threshold 0.9 and min silence 0.1 s (`:227-229`); no `speech_pad` | Hype Flow adds its own padding | Keep |
-| OpenVINO EP | `session.cc:459-505`, default `device_type = NPU` | Not shipped | Experiment (item 20) |
-| Threads | Intra- and inter-op both set from `num_threads` (`session.cc:150-152`) | `min(cpus, 4)` | Sweep |
+| Capability                                                 | Evidence                                                                                                                                                                                                                 | Status in Hype Flow              | Decision             |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- | -------------------- |
+| `model_type = "nemo_transducer"`                           | `offline-recognizer-impl.cc:295-300`                                                                                                                                                                                     | Unset                            | Adopt (item 3)       |
+| Provider config `"cpu:<cfg>"`                              | `session.cc:85-226`                                                                                                                                                                                                      | Unused                           | Measure (item 11)    |
+| `ys_log_probs`, `timestamps`, `tokens` in JSON             | greedy decoder `:60-90,141-171`; `offline-stream.cc:430-510`                                                                                                                                                             | Ignored                          | Adopt (item 10)      |
+| `blank_penalty`                                            | `offline-recognizer.cc:44`; applied in greedy and beam                                                                                                                                                                   | Field bound, 0                   | Sweep (item 11)      |
+| Per-stream hotwords                                        | `c-api.h:1332`                                                                                                                                                                                                           | Not bound                        | Maybe (item 24)      |
+| `DecodeMultipleOfflineStreams`                             | `c-api.h:1458`                                                                                                                                                                                                           | Not used                         | Maybe (item 23)      |
+| Streaming Parakeet Unified                                 | `online-recognizer-impl.cc:53-58,118-120`; presets 70/7/7, 70/2/5, 70/1/2 frames (`export_onnx_streaming.py:15-17`)                                                                                                      | No                               | Not now              |
+| Endpoint detection                                         | `c-api.h:361-370`; defaults 2.4 / 1.2 / 20 s                                                                                                                                                                             | No                               | Only with streaming  |
+| Punctuation, ITN FSTs, homophone replacer, LM, temperature | See section 7                                                                                                                                                                                                            | No                               | Skip                 |
+| VAD `neg_threshold`                                        | In C++ (`silero-vad-model-config.h:33-39`), not in the C struct                                                                                                                                                          | Implicit `max(thr − 0.15, 0.01)` | n/a                  |
+| VAD semantics                                              | Segment start at tail − 2·window − min_speech (`voice-activity-detector.cc:95-99`); end at tail − min_silence (`:112`); above `max_speech` switches to threshold 0.9 and min silence 0.1 s (`:227-229`); no `speech_pad` | Hype Flow adds its own padding   | Keep                 |
+| OpenVINO EP                                                | `session.cc:459-505`, default `device_type = NPU`                                                                                                                                                                        | Not shipped                      | Experiment (item 20) |
+| Threads                                                    | Intra- and inter-op both set from `num_threads` (`session.cc:150-152`)                                                                                                                                                   | `min(cpus, 4)`                   | Sweep                |
 
 Only in main: the NeMo feature log guard, the beam-search rewrite with
 `length_reward`, the VAD `Flush` fix, streaming Parakeet Unified fixes (#4133),
@@ -750,52 +750,52 @@ item 21.
 
 ### 8.9 Silero VAD (6.2.3)
 
-| Item | Detail |
-|---|---|
+| Item                                       | Detail                                                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Upstream defaults (`utils_vad.py:283-296`) | threshold 0.5, `neg_threshold = threshold − 0.15`, `min_speech_duration_ms` 250, `min_silence_duration_ms` 100, `speech_pad_ms` 30, `max_speech_duration_s` ∞ |
-| Long-speech handling (`:497-519,560-572`) | Cut at the longest pause; split padding |
-| Model | `data/silero_vad.onnx` 2.3 MB (v5/v6). The installed k2 export is 629 KB with `x/h/c` inputs (v4 lineage inferred) |
-| Hype Flow values | 0.3 / 0.45 s / 0.06 s / 30 s, plus 450/200 ms padding: reasonable for dictation. A/B the v6 model (item 11) |
+| Long-speech handling (`:497-519,560-572`)  | Cut at the longest pause; split padding                                                                                                                       |
+| Model                                      | `data/silero_vad.onnx` 2.3 MB (v5/v6). The installed k2 export is 629 KB with `x/h/c` inputs (v4 lineage inferred)                                            |
+| Hype Flow values                           | 0.3 / 0.45 s / 0.06 s / 30 s, plus 450/200 ms padding: reasonable for dictation. A/B the v6 model (item 11)                                                   |
 
 ### 8.10 whisper.cpp
 
-| Item | Evidence | Relevance |
-|---|---|---|
-| Native Parakeet (ggml) | `include/parakeet.h`, `src/parakeet.cpp`; greedy only; token `p`, `plog`, `is_word_start`, `duration_value`; local attention above 8192 frames (`:138-141`); GPU backends (`:827-833`) | Item 20 |
-| Parakeet quantization | `scripts/quantize-parakeet.sh`: q8_0, q4_0, q4_k, q2_k; `tests/librispeech-parakeet/` | Item 20 |
-| VAD concatenation | `src/whisper.cpp:6865-6930`: 0.1 s overlap plus 0.1 s zeros | Item 6 |
-| Streaming example | `examples/stream/stream.cpp:20-34`: `step_ms=3000`, `length_ms=10000`, `keep_ms=200`, `vad_thold=0.6`, `freq_thold=100.0` | Reference for item 12 |
-| Whisper thresholds | `temperature_inc=0.2`, `entropy_thold=2.4`, `logprob_thold=-1.0`, `no_speech_thold=0.6` | Not applicable |
+| Item                   | Evidence                                                                                                                                                                               | Relevance             |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| Native Parakeet (ggml) | `include/parakeet.h`, `src/parakeet.cpp`; greedy only; token `p`, `plog`, `is_word_start`, `duration_value`; local attention above 8192 frames (`:138-141`); GPU backends (`:827-833`) | Item 20               |
+| Parakeet quantization  | `scripts/quantize-parakeet.sh`: q8_0, q4_0, q4_k, q2_k; `tests/librispeech-parakeet/`                                                                                                  | Item 20               |
+| VAD concatenation      | `src/whisper.cpp:6865-6930`: 0.1 s overlap plus 0.1 s zeros                                                                                                                            | Item 6                |
+| Streaming example      | `examples/stream/stream.cpp:20-34`: `step_ms=3000`, `length_ms=10000`, `keep_ms=200`, `vad_thold=0.6`, `freq_thold=100.0`                                                              | Reference for item 12 |
+| Whisper thresholds     | `temperature_inc=0.2`, `entropy_thold=2.4`, `logprob_thold=-1.0`, `no_speech_thold=0.6`                                                                                                | Not applicable        |
 
 ### 8.11 faster-whisper and whisperX
 
-| Item | Evidence | Relevance |
-|---|---|---|
-| Hallucination anomaly score | `faster_whisper/transcribe.py:1278-1296` | Adapt (item 10) |
-| No-speech handling | `transcribe.py:921-929`: no VAD segments, empty output | Item 2 |
-| `VadOptions` | `vad.py:41-48`: threshold 0.5, `neg_threshold = max(thr − 0.15, 0.01)`, `min_silence_duration_ms` 2000, `speech_pad_ms` 400, `min_silence_at_max_speech` 98, `use_max_poss_sil_at_max_speech` True; split at the longest silence (`:113-139`) | Reference |
-| whisperX `merge_chunks` | `whisperx/vads/vad.py:20-53`: `chunk_size=30`, `vad_onset=0.500`, `vad_offset=0.363` | Batch packing (item 23) |
-| whisperX alignment | wav2vec2 forced alignment | Not needed |
+| Item                        | Evidence                                                                                                                                                                                                                                      | Relevance               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| Hallucination anomaly score | `faster_whisper/transcribe.py:1278-1296`                                                                                                                                                                                                      | Adapt (item 10)         |
+| No-speech handling          | `transcribe.py:921-929`: no VAD segments, empty output                                                                                                                                                                                        | Item 2                  |
+| `VadOptions`                | `vad.py:41-48`: threshold 0.5, `neg_threshold = max(thr − 0.15, 0.01)`, `min_silence_duration_ms` 2000, `speech_pad_ms` 400, `min_silence_at_max_speech` 98, `use_max_poss_sil_at_max_speech` True; split at the longest silence (`:113-139`) | Reference               |
+| whisperX `merge_chunks`     | `whisperx/vads/vad.py:20-53`: `chunk_size=30`, `vad_onset=0.500`, `vad_offset=0.363`                                                                                                                                                          | Batch packing (item 23) |
+| whisperX alignment          | wav2vec2 forced alignment                                                                                                                                                                                                                     | Not needed              |
 
 ### 8.12 NeMo (and `Speech`)
 
-| Item | Evidence | Relevance |
-|---|---|---|
-| Confidence estimation | `asr_confidence_utils.py:91-95,180-186`: entropy, `tsallis`, `alpha=0.33`, `exp` norm, `min` aggregation (streaming YAML: `alpha 0.5`, `mean`) | Item 10 |
-| Boosting tree | `context_biasing/boosting_graph_batched.py:53-95,645-690`: `context_score=1.0`, `depth_scaling=2.0`, `score_per_phrase=0.0`, `bpe_mode` (`case_insensitive` in streaming), `num_of_transcriptions=5`, `bpe_alpha=0.3` | Case variants already handled; alternative BPE splits would need a sherpa patch |
-| Keyword F-score | `context_biasing_utils.py:152-230` | Item 9 |
-| Buffered long-audio decoding | `speech_to_text_streaming_infer_rnnt.py:36-38` ("10-10-5" long files, "10-2-2" streaming); `buffered_rnnt.yaml` (`chunk_size 4.8`, padding 1.6/1.6; default model `nvidia/parakeet-unified-en-0.6b`) | Alternative to pause cuts |
-| WER normalization | `speech_to_text_eval.py:159-167`: `ignore_capitalization`, `ignore_punctuation`, `separate_punctuation` | Item 9 |
-| Augmentation | `perturb.py:457-476`: `NoisePerturbation(min_snr_db=10, max_snr_db=50)`, speed, RIR, transcode | Item 9 |
-| ITN | `inference/itn/inverse_normalizer.py` (pynini grammars, `max_number_of_permutations_per_split 729`) | Use the Voxtype port instead (item 13) |
+| Item                         | Evidence                                                                                                                                                                                                              | Relevance                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Confidence estimation        | `asr_confidence_utils.py:91-95,180-186`: entropy, `tsallis`, `alpha=0.33`, `exp` norm, `min` aggregation (streaming YAML: `alpha 0.5`, `mean`)                                                                        | Item 10                                                                         |
+| Boosting tree                | `context_biasing/boosting_graph_batched.py:53-95,645-690`: `context_score=1.0`, `depth_scaling=2.0`, `score_per_phrase=0.0`, `bpe_mode` (`case_insensitive` in streaming), `num_of_transcriptions=5`, `bpe_alpha=0.3` | Case variants already handled; alternative BPE splits would need a sherpa patch |
+| Keyword F-score              | `context_biasing_utils.py:152-230`                                                                                                                                                                                    | Item 9                                                                          |
+| Buffered long-audio decoding | `speech_to_text_streaming_infer_rnnt.py:36-38` ("10-10-5" long files, "10-2-2" streaming); `buffered_rnnt.yaml` (`chunk_size 4.8`, padding 1.6/1.6; default model `nvidia/parakeet-unified-en-0.6b`)                  | Alternative to pause cuts                                                       |
+| WER normalization            | `speech_to_text_eval.py:159-167`: `ignore_capitalization`, `ignore_punctuation`, `separate_punctuation`                                                                                                               | Item 9                                                                          |
+| Augmentation                 | `perturb.py:457-476`: `NoisePerturbation(min_snr_db=10, max_snr_db=50)`, speed, RIR, transcode                                                                                                                        | Item 9                                                                          |
+| ITN                          | `inference/itn/inverse_normalizer.py` (pynini grammars, `max_number_of_permutations_per_split 729`)                                                                                                                   | Use the Voxtype port instead (item 13)                                          |
 
 ### 8.13 llama.cpp
 
-| Item | Evidence | Relevance |
-|---|---|---|
-| Server flags | `tools/server/README.md`: load mode (`:74`), KV cache type (`:71`), grammar and JSON schema (`:153-156`), `--sleep-idle-seconds` default −1 (`:252`), speculative types (`:281-287`) | Item 22 |
-| `ngram-simple` speculative decoding for rewrite workloads | `docs/speculative.md:175-187` | Item 22 |
-| Quantization | `tools/quantize/README.md:165-168`: Q4_K_M at 4.8944 bpw | Item 22 |
+| Item                                                      | Evidence                                                                                                                                                                             | Relevance |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| Server flags                                              | `tools/server/README.md`: load mode (`:74`), KV cache type (`:71`), grammar and JSON schema (`:153-156`), `--sleep-idle-seconds` default −1 (`:252`), speculative types (`:281-287`) | Item 22   |
+| `ngram-simple` speculative decoding for rewrite workloads | `docs/speculative.md:175-187`                                                                                                                                                        | Item 22   |
+| Quantization                                              | `tools/quantize/README.md:165-168`: Q4_K_M at 4.8944 bpw                                                                                                                             | Item 22   |
 
 ---
 
@@ -805,58 +805,58 @@ Status of each item from the supplied Rust optimization checklist.
 
 ### Accuracy
 
-| Item | Status | Action |
-|---|---|---|
-| English-only decoding | Done | — |
-| Domain vocabulary | Done, with defect 4.1 | Items 1, 11 |
-| VAD tuning | Partial | Items 2, 6, 11 |
-| Audio quality | Partial (GTCRN denoise) | Measure with augmented corpus (item 9) |
-| Decoding strategy | Not compared | Item 11 |
-| Hallucination protection | Missing | Items 2, 10 |
-| Text cleanup that preserves identifiers | Partial (protected spans exist; fuzzy over-corrects) | Items 1, 10 |
+| Item                                    | Status                                               | Action                                 |
+| --------------------------------------- | ---------------------------------------------------- | -------------------------------------- |
+| English-only decoding                   | Done                                                 | —                                      |
+| Domain vocabulary                       | Done, with defect 4.1                                | Items 1, 11                            |
+| VAD tuning                              | Partial                                              | Items 2, 6, 11                         |
+| Audio quality                           | Partial (GTCRN denoise)                              | Measure with augmented corpus (item 9) |
+| Decoding strategy                       | Not compared                                         | Item 11                                |
+| Hallucination protection                | Missing                                              | Items 2, 10                            |
+| Text cleanup that preserves identifiers | Partial (protected spans exist; fuzzy over-corrects) | Items 1, 10                            |
 
 ### Latency
 
-| Item | Status | Action |
-|---|---|---|
-| Persistent model sessions | Done | — |
-| Streaming partials | Missing | Item 12 (re-decode preview) |
-| Incremental inference | Missing | Item 12 |
-| Endpoint detection | Missing | Not needed for toggle mode |
-| Dedicated workers | Done | — |
-| Inference parallelism | Fixed at `min(cpus, 4)` | Item 11 |
-| Avoid unnecessary passes | Done (no LLM, optional VAD/denoise) | Item 3 removes the startup probe |
+| Item                      | Status                              | Action                           |
+| ------------------------- | ----------------------------------- | -------------------------------- |
+| Persistent model sessions | Done                                | —                                |
+| Streaming partials        | Missing                             | Item 12 (re-decode preview)      |
+| Incremental inference     | Missing                             | Item 12                          |
+| Endpoint detection        | Missing                             | Not needed for toggle mode       |
+| Dedicated workers         | Done                                | —                                |
+| Inference parallelism     | Fixed at `min(cpus, 4)`             | Item 11                          |
+| Avoid unnecessary passes  | Done (no LLM, optional VAD/denoise) | Item 3 removes the startup probe |
 
 ### RAM and storage
 
-| Item | Status | Action |
-|---|---|---|
-| Model quantization | int8 | Item 20 |
-| Single-model mode | Done | — |
-| Lazy initialization | Done | — |
-| Bounded buffers | Done (300 s cap) | Item 6 (VAD buffer) |
-| Runtime sharing | Done (one worker) | — |
-| Compact packaging | `strip = true`, thin LTO | Optional `lto = "fat"`, `-C target-cpu=native` |
-| Idle behaviour | Done | — |
+| Item                | Status                   | Action                                         |
+| ------------------- | ------------------------ | ---------------------------------------------- |
+| Model quantization  | int8                     | Item 20                                        |
+| Single-model mode   | Done                     | —                                              |
+| Lazy initialization | Done                     | —                                              |
+| Bounded buffers     | Done (300 s cap)         | Item 6 (VAD buffer)                            |
+| Runtime sharing     | Done (one worker)        | —                                              |
+| Compact packaging   | `strip = true`, thin LTO | Optional `lto = "fat"`, `-C target-cpu=native` |
+| Idle behaviour      | Done                     | —                                              |
 
 ### Reliability and Linux
 
-| Item | Status | Action |
-|---|---|---|
-| Compositor-native shortcuts | Done (niri binds) | — |
-| Audio device changes | Partial (first-audio timeout) | Not covered by the references in depth |
-| Safe text injection | Done | Item 15 (modifier wait) |
-| Cancellation | Done | — |
-| Service lifecycle | niri `spawn-at-startup` | Optional systemd user unit (Voxtype) |
-| Privacy | Done (no network, transcript deletion on exit) | Keep history opt-in (item 19) |
+| Item                        | Status                                         | Action                                 |
+| --------------------------- | ---------------------------------------------- | -------------------------------------- |
+| Compositor-native shortcuts | Done (niri binds)                              | —                                      |
+| Audio device changes        | Partial (first-audio timeout)                  | Not covered by the references in depth |
+| Safe text injection         | Done                                           | Item 15 (modifier wait)                |
+| Cancellation                | Done                                           | —                                      |
+| Service lifecycle           | niri `spawn-at-startup`                        | Optional systemd user unit (Voxtype)   |
+| Privacy                     | Done (no network, transcript deletion on exit) | Keep history opt-in (item 19)          |
 
 ### Memory profiles
 
-| Profile | Suggested composition |
-|---|---|
-| Ultra-light | Smaller model (item 20), no VAD or denoise, greedy, aggressive unload |
+| Profile            | Suggested composition                                                                                    |
+| ------------------ | -------------------------------------------------------------------------------------------------------- |
+| Ultra-light        | Smaller model (item 20), no VAD or denoise, greedy, aggressive unload                                    |
 | Balanced (default) | Current model, greedy unless item 11 proves hotwords help, VAD with silence guard, deterministic cleanup |
-| Accuracy-first | Beam with hotwords if measured useful, GTCRN, ITN, optional LLM (item 22) |
+| Accuracy-first     | Beam with hotwords if measured useful, GTCRN, ITN, optional LLM (item 22)                                |
 
 ---
 
@@ -865,15 +865,15 @@ Status of each item from the supplied Rust optimization checklist.
 Change one variable at a time with fixed audio, hardware power profile, model,
 build and decoding parameters.
 
-| Metric | Use |
-|---|---|
-| WER/CER (normalised) | Items 6, 11, 12, 13, 20, 21 |
-| Keyword precision/recall/F1, and false insertions on non-keyword speech | Items 1, 10, 11 |
-| Empty-output rate on silence, cough, click and keyboard clips | Items 2, 10 |
-| p50/p95 stop-to-paste latency | Items 3, 4, 12, 23 |
-| Real-time factor | Items 11, 20 |
-| Idle, loaded and peak process-tree PSS | Items 3, 5, 6, 11, 20 |
-| Cold-start time | Items 3, 4 |
+| Metric                                                                  | Use                         |
+| ----------------------------------------------------------------------- | --------------------------- |
+| WER/CER (normalised)                                                    | Items 6, 11, 12, 13, 20, 21 |
+| Keyword precision/recall/F1, and false insertions on non-keyword speech | Items 1, 10, 11             |
+| Empty-output rate on silence, cough, click and keyboard clips           | Items 2, 10                 |
+| p50/p95 stop-to-paste latency                                           | Items 3, 4, 12, 23          |
+| Real-time factor                                                        | Items 11, 20                |
+| Idle, loaded and peak process-tree PSS                                  | Items 3, 5, 6, 11, 20       |
+| Cold-start time                                                         | Items 3, 4                  |
 
 Suggested order: **9, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12**, then the rest by
 need.

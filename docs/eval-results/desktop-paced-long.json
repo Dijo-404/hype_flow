@@ -2,9 +2,7 @@
   "metadata": {
     "repetitions": 2,
     "commands": {
-      "rust": [
-        "/home/dj/projects/hype_flow/target/release/hype-flow"
-      ]
+      "rust": ["/home/dj/projects/hype_flow/target/release/hype-flow"]
     },
     "audio": "/tmp/hype-flow-eval/long.wav",
     "audio_sha256": "84b4c7d891e7bd3ab5a1bc9793492626c896a22890eeda955aa6cd0e5f862e64",

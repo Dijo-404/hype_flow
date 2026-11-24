@@ -1,16 +1,16 @@
 /* macOS dark appearance: System Settings layout, system colours, SF-like rhythm. */
-@define-color hf_window #1c1c1e;        /* content background */
-@define-color hf_sidebar #262628;       /* floating sidebar */
-@define-color hf_group #252527;         /* grouped rows */
-@define-color hf_control #3a3a3c;       /* push buttons, steppers */
+@define-color hf_window #1c1c1e; /* content background */
+@define-color hf_sidebar #262628; /* floating sidebar */
+@define-color hf_group #252527; /* grouped rows */
+@define-color hf_control #3a3a3c; /* push buttons, steppers */
 @define-color hf_control_hover #444446;
 @define-color hf_field #1a1a1c;
 @define-color hf_separator alpha(white, 0.07);
 @define-color hf_hairline alpha(white, 0.09);
 @define-color hf_text alpha(white, 0.88);
 @define-color hf_muted alpha(white, 0.56);
-@define-color hf_accent #0a84ff;        /* systemBlue (dark) for rings and glyphs */
-@define-color hf_accent_fill #1a6fd8;   /* filled controls: keeps white text above 4.5:1 */
+@define-color hf_accent #0a84ff; /* systemBlue (dark) for rings and glyphs */
+@define-color hf_accent_fill #1a6fd8; /* filled controls: keeps white text above 4.5:1 */
 @define-color hf_success #30d158;
 @define-color hf_destructive #ff6961;
 
@@ -20,9 +20,17 @@
   font-family: "Noto Sans", sans-serif;
   font-size: 13px;
 }
-#hype-settings label { color: @hf_text; }
-#hype-settings .muted, #hype-settings .page-description { color: @hf_muted; }
-#hype-settings .page-description { font-size: 12px; margin-bottom: 2px; }
+#hype-settings label {
+  color: @hf_text;
+}
+#hype-settings .muted,
+#hype-settings .page-description {
+  color: @hf_muted;
+}
+#hype-settings .page-description {
+  font-size: 12px;
+  margin-bottom: 2px;
+}
 
 /* Sidebar: an inset, floating panel like macOS Sequoia. */
 #settings-sidebar {
@@ -32,7 +40,9 @@
   margin: 8px 0 8px 8px;
   padding: 10px 8px;
 }
-#hype-settings .traffic-lights { padding: 2px 6px 6px; }
+#hype-settings .traffic-lights {
+  padding: 2px 6px 6px;
+}
 #hype-settings button.traffic {
   min-width: 12px;
   min-height: 12px;
@@ -44,27 +54,61 @@
   font-weight: 800;
   transition: background-color 120ms ease-out;
 }
-#hype-settings button.traffic label { color: transparent; transition: color 120ms ease-out; }
-#hype-settings button.traffic:hover label, #hype-settings button.traffic:focus label { color: rgba(0, 0, 0, 0.6); }
-#hype-settings button.traffic.close { background: #ff5f57; }
-#hype-settings button.traffic.close:active { background: #d94a43; }
-#hype-settings button.traffic.zoom { background: #28c840; }
-#hype-settings button.traffic.zoom:active { background: #1fa533; }
-#hype-settings .brand { margin: 0 6px 2px; }
-#hype-settings .brand-name { font-size: 13px; font-weight: 600; }
+#hype-settings button.traffic label {
+  color: transparent;
+  transition: color 120ms ease-out;
+}
+#hype-settings button.traffic:hover label,
+#hype-settings button.traffic:focus label {
+  color: rgba(0, 0, 0, 0.6);
+}
+#hype-settings button.traffic.close {
+  background: #ff5f57;
+}
+#hype-settings button.traffic.close:active {
+  background: #d94a43;
+}
+#hype-settings button.traffic.zoom {
+  background: #28c840;
+}
+#hype-settings button.traffic.zoom:active {
+  background: #1fa533;
+}
+#hype-settings .brand {
+  margin: 0 6px 2px;
+}
+#hype-settings .brand-name {
+  font-size: 13px;
+  font-weight: 600;
+}
 
-#settings-navigation { background: transparent; }
+#settings-navigation {
+  background: transparent;
+}
 #settings-navigation row {
   margin: 1px 0;
   padding: 5px 8px;
   border-radius: 7px;
   transition: background-color 160ms ease-out;
 }
-#settings-navigation row label { color: @hf_text; font-size: 13px; }
-#settings-navigation row:hover { background: alpha(white, 0.06); }
-#settings-navigation row:selected { background: @hf_accent_fill; }
-#settings-navigation row:selected label { color: white; font-weight: 500; }
-#settings-navigation row:focus { outline: 2px solid alpha(@hf_accent, 0.7); outline-offset: -2px; }
+#settings-navigation row label {
+  color: @hf_text;
+  font-size: 13px;
+}
+#settings-navigation row:hover {
+  background: alpha(white, 0.06);
+}
+#settings-navigation row:selected {
+  background: @hf_accent_fill;
+}
+#settings-navigation row:selected label {
+  color: white;
+  font-weight: 500;
+}
+#settings-navigation row:focus {
+  outline: 2px solid alpha(@hf_accent, 0.7);
+  outline-offset: -2px;
+}
 
 /* System Settings icon tiles: white glyph on a softly lit rounded square. */
 #hype-settings image.tile {
@@ -73,43 +117,93 @@
   border-radius: 6px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
-#hype-settings image.tile.gray { background: linear-gradient(180deg, #a2a2a7, #7c7c81); }
-#hype-settings image.tile.blue { background: linear-gradient(180deg, #3d9bff, #0a6fe0); }
-#hype-settings image.tile.orange { background: linear-gradient(180deg, #ffb340, #f08c00); }
-#hype-settings image.tile.green { background: linear-gradient(180deg, #4cdc72, #24b04a); }
-#hype-settings image.tile.indigo { background: linear-gradient(180deg, #7d7bf0, #4f4cd8); }
+#hype-settings image.tile.gray {
+  background: linear-gradient(180deg, #a2a2a7, #7c7c81);
+}
+#hype-settings image.tile.blue {
+  background: linear-gradient(180deg, #3d9bff, #0a6fe0);
+}
+#hype-settings image.tile.orange {
+  background: linear-gradient(180deg, #ffb340, #f08c00);
+}
+#hype-settings image.tile.green {
+  background: linear-gradient(180deg, #4cdc72, #24b04a);
+}
+#hype-settings image.tile.indigo {
+  background: linear-gradient(180deg, #7d7bf0, #4f4cd8);
+}
 
 /* Content sits directly on the window, like a macOS detail pane. */
-#settings-content { background: transparent; }
-#hype-settings .page-header { padding: 20px 28px 2px; }
-#hype-settings .page-title { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
-#hype-settings .status-badge { color: @hf_muted; font-size: 12px; }
+#settings-content {
+  background: transparent;
+}
+#hype-settings .page-header {
+  padding: 20px 28px 2px;
+}
+#hype-settings .page-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+#hype-settings .status-badge {
+  color: @hf_muted;
+  font-size: 12px;
+}
 #hype-settings .status-dot {
   min-width: 7px;
   min-height: 7px;
   border-radius: 999px;
   transition: background-color 300ms ease-out;
 }
-#hype-settings .status-dot.ok { background: @hf_success; }
-#hype-settings .status-dot.busy { background: @hf_accent; }
-#hype-settings .status-dot.error { background: @hf_destructive; }
-#hype-settings .settings-page { padding: 0 28px 20px; }
+#hype-settings .status-dot.ok {
+  background: @hf_success;
+}
+#hype-settings .status-dot.busy {
+  background: @hf_accent;
+}
+#hype-settings .status-dot.error {
+  background: @hf_destructive;
+}
+#hype-settings .settings-page {
+  padding: 0 28px 20px;
+}
 
 /* Grouped rows: rounded group, separators inset from the leading edge. */
-#hype-settings .section-title { font-size: 13px; font-weight: 600; margin-left: 4px; }
+#hype-settings .section-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-left: 4px;
+}
 #hype-settings .settings-panel {
   background: @hf_group;
   border: 1px solid @hf_hairline;
   border-radius: 10px;
 }
-#hype-settings .setting-row { margin-left: 14px; padding: 9px 14px 9px 0; }
+#hype-settings .setting-row {
+  margin-left: 14px;
+  padding: 9px 14px 9px 0;
+}
 #hype-settings .setting-row + .setting-row,
-#hype-settings .panel-body + .setting-row { border-top: 1px solid @hf_separator; }
-#hype-settings .setting-row + .panel-body { padding-top: 0; }
-#hype-settings .row-title { font-size: 13px; }
-#hype-settings .setting-row .muted, #hype-settings .panel-body .muted { font-size: 12px; }
-#hype-settings .model-header { padding: 12px 14px 2px; }
-#hype-settings .model-title { font-size: 14px; font-weight: 600; }
+#hype-settings .panel-body + .setting-row {
+  border-top: 1px solid @hf_separator;
+}
+#hype-settings .setting-row + .panel-body {
+  padding-top: 0;
+}
+#hype-settings .row-title {
+  font-size: 13px;
+}
+#hype-settings .setting-row .muted,
+#hype-settings .panel-body .muted {
+  font-size: 12px;
+}
+#hype-settings .model-header {
+  padding: 12px 14px 2px;
+}
+#hype-settings .model-title {
+  font-size: 14px;
+  font-weight: 600;
+}
 #hype-settings .model-badge {
   color: @hf_muted;
   background: alpha(white, 0.08);
@@ -118,9 +212,16 @@
   font-size: 11px;
   font-weight: 500;
 }
-#hype-settings .model-description { padding: 0 14px 10px; font-size: 12px; }
-#hype-settings .panel-body { padding: 10px 14px 12px; }
-#hype-settings .shortcut-hint { padding: 2px 4px 0; }
+#hype-settings .model-description {
+  padding: 0 14px 10px;
+  font-size: 12px;
+}
+#hype-settings .panel-body {
+  padding: 10px 14px 12px;
+}
+#hype-settings .shortcut-hint {
+  padding: 2px 4px 0;
+}
 #hype-settings .keycap {
   background: alpha(white, 0.1);
   border: 1px solid alpha(white, 0.06);
@@ -133,7 +234,8 @@
 }
 
 /* Push buttons: filled, borderless, with a faint top highlight. */
-#hype-settings button, #hype-settings combobox button {
+#hype-settings button,
+#hype-settings combobox button {
   background: @hf_control;
   background-image: none;
   border: none;
@@ -146,25 +248,50 @@
   min-width: 0;
   padding: 4px 12px;
   font-size: 13px;
-  transition: background-color 150ms ease-out, box-shadow 150ms ease-out;
+  transition:
+    background-color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
-#hype-settings button:hover { background: @hf_control_hover; }
-#hype-settings button:active { background: #2e2e30; box-shadow: none; }
+#hype-settings button:hover {
+  background: @hf_control_hover;
+}
+#hype-settings button:active {
+  background: #2e2e30;
+  box-shadow: none;
+}
 #hype-settings button.primary {
   background: linear-gradient(180deg, #2b7ef0, @hf_accent_fill);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
   padding: 5px 16px;
 }
-#hype-settings button.primary label { color: white; font-weight: 500; }
-#hype-settings button.primary:hover { background: linear-gradient(180deg, #3a88f4, #1f78e4); }
-#hype-settings button.primary:active { background: #155fc0; }
-#hype-settings button:disabled { background: alpha(white, 0.06); box-shadow: none; }
-#hype-settings button:disabled label, #hype-settings button.primary:disabled label { color: alpha(white, 0.3); }
-#hype-settings button.primary.saved { background: alpha(@hf_success, 0.16); }
-#hype-settings button.primary.saved label { color: @hf_success; }
+#hype-settings button.primary label {
+  color: white;
+  font-weight: 500;
+}
+#hype-settings button.primary:hover {
+  background: linear-gradient(180deg, #3a88f4, #1f78e4);
+}
+#hype-settings button.primary:active {
+  background: #155fc0;
+}
+#hype-settings button:disabled {
+  background: alpha(white, 0.06);
+  box-shadow: none;
+}
+#hype-settings button:disabled label,
+#hype-settings button.primary:disabled label {
+  color: alpha(white, 0.3);
+}
+#hype-settings button.primary.saved {
+  background: alpha(@hf_success, 0.16);
+}
+#hype-settings button.primary.saved label {
+  color: @hf_success;
+}
 
 /* Focus: a plain accent outline, no glow. */
-#hype-settings button:focus, #hype-settings switch:focus {
+#hype-settings button:focus,
+#hype-settings switch:focus {
   outline: 2px solid alpha(@hf_accent, 0.7);
   outline-offset: 2px;
 }
@@ -180,8 +307,14 @@
   min-height: 18px;
   transition: border-color 150ms ease-out;
 }
-#hype-settings entry:focus { outline: none; border-color: @hf_accent; }
-#hype-settings entry selection { background: alpha(@hf_accent, 0.55); color: white; }
+#hype-settings entry:focus {
+  outline: none;
+  border-color: @hf_accent;
+}
+#hype-settings entry selection {
+  background: alpha(@hf_accent, 0.55);
+  color: white;
+}
 
 /* macOS switch: accent when on, translucent track when off. */
 #hype-settings switch {
@@ -192,35 +325,53 @@
   min-height: 20px;
   transition: background-color 200ms ease-out;
 }
-#hype-settings switch:checked { background: @hf_accent_fill; }
+#hype-settings switch:checked {
+  background: @hf_accent_fill;
+}
 #hype-settings switch slider {
   background: #f5f5f7;
   border: none;
   border-radius: 999px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.15);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.15);
   min-height: 16px;
   min-width: 16px;
   margin: 2px;
 }
-#hype-settings switch:disabled { opacity: 0.45; }
+#hype-settings switch:disabled {
+  opacity: 0.45;
+}
 
-#hype-settings .settings-footer { padding: 10px 28px 12px; border-top: 1px solid @hf_separator; }
-#hype-settings .settings-footer .error { color: @hf_destructive; }
+#hype-settings .settings-footer {
+  padding: 10px 28px 12px;
+  border-top: 1px solid @hf_separator;
+}
+#hype-settings .settings-footer .error {
+  color: @hf_destructive;
+}
 
 #hype-settings .text-editor {
   background: @hf_field;
   border: 1px solid alpha(white, 0.1);
   border-radius: 6px;
 }
-#hype-settings textview, #hype-settings textview text {
+#hype-settings textview,
+#hype-settings textview text {
   background: transparent;
   color: @hf_text;
   caret-color: @hf_accent;
   font-family: "Noto Sans", sans-serif;
   font-size: 13px;
 }
-#hype-settings textview:focus { outline: 1px solid alpha(@hf_accent, 0.8); outline-offset: -1px; }
-#hype-settings textview text selection { background: alpha(@hf_accent, 0.55); color: white; }
+#hype-settings textview:focus {
+  outline: 1px solid alpha(@hf_accent, 0.8);
+  outline-offset: -1px;
+}
+#hype-settings textview text selection {
+  background: alpha(@hf_accent, 0.55);
+  color: white;
+}
 
 /* Stepper: one control instead of three boxes. */
 #hype-settings spinbutton {
@@ -230,7 +381,13 @@
   border-radius: 6px;
   box-shadow: none;
 }
-#hype-settings spinbutton entry { border: none; background: transparent; box-shadow: none; min-width: 34px; padding: 4px 10px; }
+#hype-settings spinbutton entry {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  min-width: 34px;
+  padding: 4px 10px;
+}
 #hype-settings spinbutton button {
   background: transparent;
   border-left: 1px solid alpha(white, 0.1);
@@ -239,11 +396,19 @@
   padding: 3px 9px;
   color: @hf_muted;
 }
-#hype-settings spinbutton button:last-child { border-radius: 0 5px 5px 0; }
-#hype-settings spinbutton button:hover { background: alpha(white, 0.06); color: @hf_text; }
+#hype-settings spinbutton button:last-child {
+  border-radius: 0 5px 5px 0;
+}
+#hype-settings spinbutton button:hover {
+  background: alpha(white, 0.06);
+  color: @hf_text;
+}
 
 /* Overlay scrollbars, thin and quiet. */
-#hype-settings scrollbar { background: transparent; border: none; }
+#hype-settings scrollbar {
+  background: transparent;
+  border: none;
+}
 #hype-settings scrollbar slider {
   background: alpha(white, 0.18);
   border: none;
@@ -251,11 +416,16 @@
   min-width: 6px;
   min-height: 6px;
 }
-#hype-settings scrollbar slider:hover { background: alpha(white, 0.3); }
+#hype-settings scrollbar slider:hover {
+  background: alpha(white, 0.3);
+}
 
 tooltip.background {
   background: #2c2c2e;
   border: 1px solid alpha(white, 0.1);
   border-radius: 6px;
 }
-tooltip label { color: alpha(white, 0.88); font-size: 12px; }
+tooltip label {
+  color: alpha(white, 0.88);
+  font-size: 12px;
+}

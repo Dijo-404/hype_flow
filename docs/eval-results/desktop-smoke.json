@@ -2,9 +2,7 @@
   "metadata": {
     "repetitions": 1,
     "commands": {
-      "rust": [
-        "/home/dj/projects/hype_flow/target/release/hype-flow"
-      ]
+      "rust": ["/home/dj/projects/hype_flow/target/release/hype-flow"]
     },
     "audio": "/tmp/hype-flow-eval/jfk.wav",
     "audio_sha256": "d7d4e74b8a333ed02186008bc109a1b1a19d16da668bd56e785d80d69a16a72f",

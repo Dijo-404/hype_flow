@@ -1,143 +1,316 @@
+<a id="readme-top"></a>
+
+<div align="center">
+
+<picture>
+  <img src="assets/logo.svg" alt="Hype Flow logo" width="110" />
+</picture>
+
 # Hype Flow
 
-Native offline English dictation for niri. Open **Hype Flow** from your launcher. Press **Alt + Space**, speak, then press again to paste into the original window. **Super + Ctrl + Escape** cancels.
+**Offline English dictation for niri. Speak into your active window.**
 
-The default model is **Parakeet 110M CTC English INT8**. Its installed model files total **131.7 MB**. It supports English with punctuation and capitalization. At login, Hype Flow starts without loading the speech model. The CPU worker loads in parallel with the first recording and unloads after 10 idle minutes by default (Speech model → Memory). It exchanges audio and results over anonymous pipes.
+[![Build](https://img.shields.io/github/actions/workflow/status/Dijo-404/hype_flow/ci.yml?branch=main&style=for-the-badge&label=build&color=555555)](https://github.com/Dijo-404/hype_flow/actions/workflows/ci.yml)
+![Rust](https://img.shields.io/badge/Rust-555555?style=for-the-badge&logo=rust&logoColor=white)
+![Linux x86_64](https://img.shields.io/badge/Linux-x86__64-555555?style=for-the-badge&logo=linux&logoColor=white)
 
-## Desktop setup
+[Quick start](#quick-start) · [Usage](#usage) · [Documentation](#documentation) · [Contributing](#contributing)
 
-The Hype Niri `hype-flow` installer option sets up the model, shortcuts, and background startup. For manual setup in the app, open **Speech model** and choose **Install selected model**. Setup verifies the selected archive and pinned native runtime before activating the model. To switch models, choose **110M TDT** or **Unified**, save the choice, and install it. Existing installations with a saved model continue using it until you install a different one.
+</div>
 
-CTC worker revision 8 preserves the original pauses within each decode piece. After updating Hype Flow, refresh an older CTC worker through **Speech model** by installing the CTC profile again. Setup reuses a verified cached archive when available.
+<br />
 
-With silence cutting enabled, Parakeet CTC uses a fixed 32 ms digital lead-in before decoding. This keeps added all-zero audio from shifting the decode boundaries. Dictation duration and word timestamps still refer to the original recording.
+<p align="center">
+  <picture>
+    <img src="docs/assets/settings.png" alt="Hype Flow's General settings with dictation and microphone controls" width="820" />
+  </picture>
+</p>
 
-Choose **Configure niri** under **Shortcuts** to add bindings and autostart manually. The app validates the resulting configuration and saves a backup. Existing display settings at `Super + Shift + D` remain available.
+## Overview
 
-Click the current **Dictate** or **Cancel** shortcut under **Shortcuts**, then press the key combination you want, such as `Alt+F9`. Press Escape or click away to cancel capture. Choose **Save changes** to apply the new shortcut. Existing preferences keep the original shortcuts until edited. Changes validate the complete niri configuration, reject conflicts, and back up both the configuration and the managed bindings.
+Hype Flow is a native Linux dictation app for niri. Press a shortcut, speak, and press it again to paste into the window where you started. Recognition runs locally on the CPU using Parakeet 110M CTC English INT8 by default.
 
-For Alt-based shortcuts in VS Code, set `"window.customMenuBarAltFocus": false` in VS Code's settings. Otherwise, releasing Alt can focus the menu bar and leave Chat without keyboard focus, so dictation starts but its text does not reach the Chat input.
+### Features
 
-Settings use a macOS-style dark layout: a floating sidebar with window controls, grouped rows, and subtle page transitions. The window adapts to narrow layouts. **Save changes** becomes available after an edit and applies supported preferences. Closing the window with its close button or **Ctrl+W** leaves dictation available in the background; **Ctrl+Q** quits Hype Flow.
+- **Dictate without leaving your app.** The recording capsule keeps focus on your text field. Click it to finish or right-click to cancel.
+- **Start at login with a small footprint.** The default model takes 131.7 MB on disk. The worker loads during your first recording and unloads after 10 idle minutes by default.
+- **Keep your preferred spellings.** Add vocabulary and exact text corrections, filter filler words, and copy the original recognition result whenever you need it.
+- **Work with longer dictation.** Capture up to five minutes. Hype Flow prefers pauses when splitting audio and decodes completed pieces while you speak.
+- **Choose what stays on disk.** Audio stays in memory by default. Enable history or recovery to keep recent recordings for retry.
 
-With `hype_niri`'s `feature/niri-notch` integration, the waveform capsule appears inside the notch. Otherwise a native fallback capsule appears near the bottom of the screen. Click the capsule to finish recording or right-click to cancel. The notch drawer also provides dictation, cancel, copy-last, and settings controls. Recording surfaces do not take keyboard focus.
+## Requirements
 
-Start speaking at the start sound, which plays once the microphone delivers audio (PipeWire takes about 200 ms). Each dictation stops at five minutes. Cancelling inference releases the worker; the next dictation reloads the model. A recording of pure digital silence reports a muted microphone instead of "No speech detected".
+| Requirement  | Details                                                                                                             |
+| :----------- | :------------------------------------------------------------------------------------------------------------------ |
+| **OS**       | Linux x86_64 with a niri Wayland session and a session D-Bus                                                        |
+| **Build**    | Current stable Rust, Cargo, Make, a C toolchain, and pkg-config                                                     |
+| **Desktop**  | GTK 4.12 or newer, gtk4-layer-shell, PipeWire, wl-clipboard 2.3 or newer, wtype, and bubblewrap                     |
+| **Optional** | `playerctl` to pause and resume media, Python 3.11 or newer for evaluation tooling, and PyGObject for desktop tests |
 
-**General** also offers: a trailing space after pasted text; Enter after pasting, which sends chat messages and is never sent to terminals; a microphone picker; start and stop sounds; pausing media players that are playing, then resuming exactly those; and **Keep microphone ready**, off by default, which holds the microphone open for 30 seconds after a dictation so the next one starts instantly and includes the half second before the shortcut. The microphone indicator stays on while it is held.
+## Installation
 
-## Installation from source
+On Arch Linux, install the dependencies and build Hype Flow from source.
 
-Requires Linux x86_64, a current stable Rust toolchain, GTK4, gtk4-layer-shell, PipeWire, wl-clipboard 2.3+, wtype, bubblewrap, and niri. The application and speech worker build with Cargo; first-use model setup does not compile C code. On Arch:
+```bash
+sudo pacman -S --needed base-devel git rust gtk4 gtk4-layer-shell pipewire wl-clipboard wtype bubblewrap
+git clone https://github.com/Dijo-404/hype_flow.git
+cd hype_flow
+make install
+```
 
-```sh
-sudo pacman -S base-devel rust gtk4 gtk4-layer-shell pipewire wl-clipboard wtype bubblewrap
+This installs the app, recognizer, and evaluator under `~/.local/bin` and adds **Hype Flow** to your launcher. On other distributions, install the equivalent dependencies from [Requirements](#requirements) before running `make install`.
+
+<details>
+<summary><b>Hype Niri installation</b></summary>
+
+<br />
+
+Use the `hype-flow` option in the Hype Niri installer to set up the application, speech model, shortcuts, and background startup. [Hype Niri](https://github.com/Dijo-404/hype_niri)
+
+</details>
+
+### Updating
+
+Pull the latest changes from your checkout and reinstall.
+
+```bash
+git pull --ff-only
 make install
 ~/.local/bin/hype-flow --setup
 ```
 
-`make install` creates the desktop launcher and installs release binaries. Run `--setup` to download the configured model, validate and configure the Niri shortcuts, and enable background startup at login. Setup works from a terminal without a graphical session. It reuses installed models and saved shortcuts. The developer evaluator uses Python for the pinned Whisper English scoring normalizer. An existing launcher and desktop entry are retained under `$XDG_DATA_HOME/hype-flow/rollback`.
+Quit the running app with **Ctrl+Q** in its settings window, then reopen it. Setup reuses a compatible model and preserves saved shortcuts. Use **Speech model → Install selected model** to refresh the managed worker or activate a different profile.
 
-## Project layout
+### Uninstalling
+
+Quit Hype Flow. Remove the include for the managed `hype-flow.kdl` from your niri config, then remove that managed file. If you added bindings or autostart manually, remove those entries from the config where you added them.
+
+These commands remove the binaries, private library, and launcher from the default install prefix.
+
+```bash
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+rm -f ~/.local/bin/hype-flow ~/.local/bin/hype-flow-recognizer ~/.local/bin/hype-flow-evaluate
+rm -f ~/.local/share/hype-flow/lib/libgtk4-layer-shell.so.0
+rm -f "$data_home/applications/dev.hype.Flow.desktop"
+rm -f "$data_home/icons/hicolor/scalable/apps/dev.hype.Flow.svg"
+```
+
+Settings, model downloads, backups, and recordings remain in the locations listed under [Files it creates](#files-it-creates). Use **General → Delete saved recordings** before uninstalling if you want to clear retained audio.
+
+## Quick start
+
+```bash
+~/.local/bin/hype-flow --setup  # Download the model and configure niri shortcuts and autostart.
+~/.local/bin/hype-flow          # Open Hype Flow settings from your niri session.
+```
+
+1. Focus a text field and press **Alt+Space**.
+2. Speak when you hear the start sound.
+3. Press **Alt+Space** again to transcribe and paste. Press **Super+Ctrl+Escape** to cancel.
+
+Setup verifies the model and native runtime before activation. You can also set up the model in **Speech model → Install selected model** and add bindings in **Shortcuts → Configure niri**.
+
+## Usage
+
+### Commands
+
+| Command                  | Description                                                                                         |
+| :----------------------- | :-------------------------------------------------------------------------------------------------- |
+| `hype-flow`              | Open the settings window.                                                                           |
+| `hype-flow --setup`      | Install the configured model and configure niri. Works from a terminal without a graphical session. |
+| `hype-flow --background` | Start without opening settings.                                                                     |
+| `hype-flow --toggle`     | Start recording or finish the current recording.                                                    |
+| `hype-flow --cancel`     | Cancel recording or inference.                                                                      |
+| `hype-flow --help`       | Show the GApplication command-line options.                                                         |
+
+### Keybindings
+
+| Key                   | Action                                     |
+| :-------------------- | :----------------------------------------- |
+| **Alt+Space**         | Start or finish recording.                 |
+| **Super+Ctrl+Escape** | Cancel dictation.                          |
+| **Ctrl+W**            | Close settings and keep dictation running. |
+| **Ctrl+Q**            | Quit Hype Flow.                            |
+
+To change a shortcut, click **Dictate** or **Cancel** under **Shortcuts**, press the new combination, and choose **Save changes**. Hype Flow validates the niri config, rejects conflicting bindings, and backs up the affected files. **Hold** mode requires a niri build that supports native press and release bindings.
+
+When a compatible Hype Niri notch is running, it shows recording state and provides dictate, cancel, copy-last, and settings controls. The built-in capsule is available on other niri setups.
+
+### Examples
+
+**Correct the way a name is written.** In **Text cleanup**, add one literal correction per line. Matching ignores case and uses whole words or phrases.
 
 ```text
-src/*.rs               Rust application, GTK4 UI and speech pipeline
-src/bin/evaluate.rs    Rust word-error-rate evaluation tool
-worker/                Rust inference worker and pinned generated API bindings
-assets/                Embedded stylesheet, logo and common-word list
-tools/                 Installation, evaluation and desktop verification tools
-tests/                 Rust tests, regression fixtures and test drivers
-docs/                  Configuration, provenance and migration evidence
-Cargo.toml             Rust package metadata and desktop entry point
-Cargo.lock             Pinned Rust dependency versions
+open ai => OpenAI
 ```
 
-For development, run `cargo build --workspace`, then `cargo run --bin hype-flow`. If GTK4 layer-shell is installed under `~/.local`, include `~/.local/lib/pkgconfig` in `PKG_CONFIG_PATH` when invoking Cargo directly. Make sets this automatically.
+Choose **Copy original** under **General** to recover text before cleanup. Default filler filtering removes `um`, `uh`, `erm`, `umm`, and `uhh`. Near-miss corrections, spoken commands, number formatting, and repeated-word removal are available as opt-in controls.
 
-`make release` builds the desktop app and the worker used by first-use model setup. The [migration results](docs/migration-results.md) record the Python-to-Rust and C-to-Rust comparisons.
+**Switch speech models.** In **Speech model**, choose **110M TDT** or **Unified**, save, and select **Install selected model**. Your active model remains in use until installation succeeds. Unified also supports optional native vocabulary boosting.
 
-## Accuracy and limits
+## Configuration
 
-Parakeet 110M CTC prioritizes fast English dictation on CPU. Unified remains available for accuracy-focused use. See [provenance](docs/third_party.md) and [benchmark results](docs/eval-results/README.md).
+Settings live at `~/.config/hype-flow/config.toml` by default. Every key is optional. Use the settings window for common options, including microphone selection, paste behavior, start and stop sounds, and **Keep microphone ready**. That last option keeps the microphone open for 30 seconds after a dictation and can include audio from up to half a second before the next shortcut.
 
-Long recordings use pause-aware chunks capped at 15 seconds by default. Completed pieces decode during capture, so stopping usually leaves only the final piece. **Cut silence before recognition** runs Silero VAD in the worker. It keeps up to 450 ms before speech and 200 ms after, and returns empty text if it detects no speech. The optional `soft_speech_retry` uses an energy gate to allow one retry on sustained audible input. Recordings under 300 ms are rejected. `backend.log` records how much audio VAD kept.
-
-**Suppress background noise** (off by default) runs sherpa-onnx's GTCRN speech-enhancement model before voice detection. It adds about 0.5 seconds per dictation. In a test with white noise down to 3 dB SNR, Parakeet already transcribed without errors with and without it, so enable it for loud rooms and compare with `hype-flow-evaluate` on your own recordings. Both small models (Silero VAD 644 KB, GTCRN 536 KB) install with the speech runtime and are checksum-verified.
-
-This runtime uses INT8 CPU inference. **Vocabulary** applies preferred capitalization after recognition. Unified supports optional native decoder boosting from 0.5 to 3.0. Boosting can slow decoding and insert unwanted words. Compare it on your own recordings using `hype-flow-evaluate --config docs/eval.toml --boosting on` and `--boosting off` with Unified installed.
-
-**Near-miss correction** is opt-in. It joins split names such as “Charge B” and uses bounded spelling and phonetic checks for unique vocabulary matches. Common words, short spellings, ambiguous matches, and paths are protected. Explicit correction rules take priority. The optional confidence gate holds back guessed corrections unless the matching words have low decoder confidence.
-
-**Text cleanup** applies your configured literal corrections and preferred vocabulary capitalization. Add one rule per line, for example `open ai => OpenAI`. Matching ignores case and uses whole words or phrases; it does not guess spelling or rewrite grammar. By default, filtering removes `um, uh, erm, umm, uhh`. Edit that list to remove other unwanted words or phrases. URLs, email addresses, quoted text, inline code, and unlisted uppercase acronyms are preserved. Adjacent repeated-word removal is optional and off by default; meaningful words such as “like” and “you know” remain unless you list them.
-
-**Copy original** under **General** recovers the latest recognition result before text cleanup. If filtering removes everything, no paste occurs and the original remains recoverable. Disabling corrections or filtering takes effect without reloading the model.
-
-Common preferences are available in the desktop window. Advanced paths, CPU threads, and microphone target are documented in [docs/config.toml](docs/config.toml). Model files live under `$XDG_DATA_HOME/hype-flow`, defaulting to `~/.local/share/hype-flow`. Previous default Whisper paths migrate to Parakeet; custom paths stay intact until a new model is explicitly installed. Applying a new model saves previous settings to `config.toml.previous` and retains other preferences. Old downloaded models are not deleted.
-
-For custom post-processing, an executable you own at `~/.config/hype-flow/transcript-hook`, not writable by others, receives each cleaned transcript on standard input; its standard output is pasted instead. It has 30 seconds. If it fails, times out or is untrusted, the cleaned transcript is pasted and the status line says why.
-
-## Paste and privacy
-
-Text is copied with `wl-copy` and pasted with `wtype`. VS Code, Cursor and VSCodium use `Shift+Insert`, following OpenWhispr's editor-specific Linux route; both the clipboard and primary selection receive the transcript for these apps. About 30 known terminal applications use `Ctrl+Shift+V`; other applications use `Ctrl+V`. Embedded terminals and custom shortcuts may require automatic paste disabled. If focus changes during inference, Hype Flow returns focus to the window where dictation started, confirms it, and pastes there. If that window has closed, the text is copied without typing. Focus can still change between the final check and keystroke delivery.
-
-The optional `modifier_release_guard` setting polls already-readable Linux keyboard devices before pasting. It waits at least 50 ms and cancels automatic paste after 1.5 seconds if modifiers remain held. Without keyboard access, it keeps the existing 180 ms delay. No input-device permissions are changed.
-
-Fuzzy vocabulary matching is disabled by default. When enabled, it protects common words, short spellings, ambiguous matches, and paths. Exact vocabulary capitalization and configured corrections remain available. Native hotword output is capped at 100 entries after case variants. Boosted output that echoes the vocabulary list is discarded; punctuation-only output, `<unk>`, and common noise tags are filtered. The original recognition remains recoverable through **Copy original**. Optional repeated-word removal preserves “had had”, “that that”, “very very”, “no no”, “yes yes”, “ha ha”, and “so so”.
-
-After an automatic paste, Hype Flow restores the previous clipboard 0.8 seconds later, unless something new was copied in the meantime; an empty clipboard is cleared again. For the editor-specific `Shift+Insert` route, the previous primary selection is restored independently unless it changed. When text is only copied, the clipboard and the primary selection (`Shift+Insert`) keep the transcript. Hype Flow marks its clipboard writes sensitive, but clipboard managers may still save them. The latest original and cleaned transcripts stay in mode-0600 runtime files until application exit or replacement. A nonempty vocabulary list also occupies a private runtime file while its speech worker is loaded. By default, audio stays in memory and travels to the native worker through pipes. Recovery and history persist audio only when explicitly enabled. The worker runs inside a bubblewrap network namespace with only loopback, so it cannot reach any network; `backend.log` records whether the sandbox was active. **Copy transcript** recovers text after a paste failure. There is no transcript database.
-
-The notch receives state and microphone levels over session D-Bus, never transcript text. Its existing weather and web-search features remain independent of offline dictation. Runtime diagnostics are stored at `$XDG_RUNTIME_DIR/hype-flow/backend.log`.
-
-## Developer validation
-
-```sh
-make check
-make check-python
+```toml
+model_variant = "parakeet-ctc"
+dictation_shortcut = "Alt+Space"
+unload_minutes = 10
 ```
 
-Run `make check-desktop` only inside a controlled Wayland compositor and an isolated D-Bus session. It uses synthetic capture and its own paste target. The desktop driver requires Python/PyGObject only as development test tooling.
+See the [annotated config](docs/config.toml) for all options and defaults and the [niri snippet](docs/niri.kdl) for manual bindings.
 
-The evaluation harness uses the same persistent engine and chunking as live dictation, without recording or clipboard output. Supply mono 16 kHz PCM16 WAV files and a JSONL manifest with paths relative to it:
+### Environment variables
 
-```json
-{"audio":"english.wav","text":"Expected spoken words."}
+| Variable          | Effect                                                                                      |
+| :---------------- | :------------------------------------------------------------------------------------------ |
+| `XDG_CONFIG_HOME` | Settings base directory. Defaults to `~/.config`.                                           |
+| `XDG_DATA_HOME`   | Models, native runtime, launcher assets, and install backups. Defaults to `~/.local/share`. |
+| `XDG_STATE_HOME`  | Root for opt-in recording retention. Defaults to `~/.local/state`.                          |
+| `XDG_RUNTIME_DIR` | Required by the desktop app for private runtime files. Your session sets it.                |
+| `NIRI_CONFIG`     | Override which niri config setup and shortcut changes modify.                               |
+
+### Files it creates
+
+| Path                              | Contents                                                                                                    |
+| :-------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| `~/.config/hype-flow/config.toml` | Preferences. Model activation saves the previous config as `config.toml.previous`.                          |
+| `~/.config/niri/hype-flow.kdl`    | Managed bindings and autostart. Setup adds an include and saves timestamped backups beside the niri config. |
+| `~/.local/share/hype-flow/`       | Speech models, inference runtime, setup cache, and installer rollback files.                                |
+| `$XDG_RUNTIME_DIR/hype-flow/`     | Latest original and cleaned transcripts and `backend.log`.                                                  |
+| `~/.local/state/hype-flow/`       | Opt-in recovery and history audio. Each collection keeps its latest 20 recordings.                          |
+
+## Privacy and safety
+
+- Setup downloads and checksum-verifies the selected speech assets. Recognition runs locally. The worker uses a bubblewrap network namespace when available. Check `$XDG_RUNTIME_DIR/hype-flow/backend.log` for its sandbox status.
+- The latest transcripts are stored in mode-0600 runtime files until app exit or replacement. The notch receives recording state and microphone levels over session D-Bus. Transcript text stays with Hype Flow.
+- Hype Flow marks clipboard writes as sensitive. Clipboard managers may retain copied text. After automatic paste, Hype Flow restores the previous clipboard and, for supported editors, the primary selection unless they changed. Copy-only delivery leaves the transcript on the clipboard.
+- **Retry last failed** and **Retry recent recording** copy the result for review. Switch off both retention options to stop saving audio. Use **Delete saved recordings** to remove existing recordings.
+- An optional executable at `~/.config/hype-flow/transcript-hook` receives cleaned text on standard input. Its output replaces the paste text. The file must belong to you and be writable only by you. A failure or 30-second timeout falls back to the cleaned text.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["PipeWire capture"] --> B["Pause-aware audio chunks"]
+    B --> C["Parakeet CPU worker"]
+    C --> D["Text cleanup"]
+    D --> E["Wayland clipboard and paste"]
 ```
 
-```sh
-hype-flow-evaluate recordings.jsonl --max-wer 0.05
+The app sends PCM audio to the Rust worker through anonymous pipes. It decodes completed pieces during capture and processes the final piece when you stop. The default CTC profile preserves internal pauses and uses a fixed 32 ms lead-in when silence cutting is enabled. After cleanup, Hype Flow returns focus to the original window and verifies it before pasting. If that window closed, Hype Flow copies the transcript.
+
+## Tech stack
+
+| Component                  | Tool                                                                                              |
+| :------------------------- | :------------------------------------------------------------------------------------------------ |
+| **Application and worker** | [Rust](https://www.rust-lang.org/)                                                                |
+| **Desktop and capsule**    | [GTK 4](https://www.gtk.org/) and [GTK4 layer shell](https://github.com/wmww/gtk4-layer-shell)    |
+| **Capture**                | [PipeWire](https://pipewire.org/)                                                                 |
+| **Inference**              | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)                                              |
+| **Clipboard and typing**   | [wl-clipboard](https://github.com/bugaevc/wl-clipboard) and [wtype](https://github.com/atx/wtype) |
+
+## Project structure
+
+```text
+.
+├── src/       # Desktop app, dictation pipeline, and evaluator
+├── worker/    # Rust inference worker and pinned native bindings
+├── assets/    # Embedded stylesheet, logo, and common-word list
+├── tools/     # Installer, binding generator, and evaluation tools
+├── tests/     # Rust and Python checks, fixtures, and desktop drivers
+├── docs/      # Configuration, evaluation results, and provenance
+└── README.md
 ```
 
-The harness reports per-clip time, original recognition text, cleaned text, and both word error rates. It fails when cleaned word error rate exceeds the chosen threshold. Normalization ignores punctuation and case. The smoke corpus is only a regression check, not a broad accuracy benchmark.
+## Development
 
+Install the build dependencies, then run the test and build targets.
 
-Opt-in recording recovery and history are available in General settings. Recovery
-keeps the latest 20 failed/interrupted recordings; history keeps the latest 20
-successful recordings. Audio is stored under `$XDG_STATE_HOME/hype-flow` in
-mode-0700 directories with mode-0600 WAV files. Interrupted raw spools are recovered
-at startup when either storage option is enabled. **Retry last failed** and
-**Retry recent recording** re-run recognition and copy the result for review;
-they do not guess an old application's input target. **Delete saved recordings**
-clears persisted audio. Turning retention off does not erase existing files.
-With both storage options off, capture remains memory-only.
+```bash
+make check          # Rust tests, rustfmt, and Clippy.
+make check-python   # Python unit tests and bytecode compilation.
+make release        # Build release binaries for installation.
+```
 
-Optional text controls add spoken punctuation, whole-utterance **New line**,
-**New paragraph** and **Scratch that**, bounded restart removal, and conservative
-English number/money/time formatting. Scratch that retracts only its own utterance;
-it never deletes text from another application. Capital handoff after filler
-removal is separately selectable. URL, email, quoted and inline-code spans remain
-protected. Original recognition is still available through **Copy original**.
+Run these additional checks with Ruff, Prettier, ShellCheck, shfmt, Tombi, and actionlint installed.
 
-Confidence filtering permits fuzzy vocabulary changes only when metadata marks
-all candidate words as low-confidence. Missing or conflicting confidence keeps
-the original spelling. Optional hallucination filtering rejects anomalous timing
-and token probabilities while retaining the original transcript for review.
-These gates default off pending calibration on representative speech.
+```bash
+ruff check tests tools
+ruff format --check tests tools
+git ls-files -z -- '*.md' '*.json' '*.yml' '*.yaml' '*.css' | xargs -0 prettier --check
+shellcheck tools/*.sh
+shfmt -i 4 -d tools
+tombi format --check Cargo.toml worker/Cargo.toml docs/config.toml docs/eval.toml
+actionlint
+```
 
-**Shortcut behavior** selects toggle or hold. Hold uses niri native press/release
-bindings; saving it validates compositor support before changing shortcuts. The
-installed niri 26.04 build does not support those bindings, so it rejects hold
-without changing the existing settings or bindings. No input-device permissions
-are changed. Model changes keep the current model active until installation
-finishes; low-memory activation disables unsupported native boosting and resets
-model-local runtime experiments to CPU defaults. Vocabulary text corrections
-and preferred spellings remain available.
+Run `make check-desktop` inside a controlled Wayland compositor and an isolated D-Bus session. The harness uses synthetic audio and its own GTK paste target. For direct Cargo commands, add `~/.local/lib/pkgconfig` to `PKG_CONFIG_PATH` if you installed GTK4 layer shell there.
+
+To compare recognition results, supply mono 16 kHz PCM16 WAV files and a JSONL manifest with paths relative to it. Run `hype-flow-evaluate recordings.jsonl --max-wer 0.05` to check the cleaned word error rate. See the [evaluation guide](docs/eval-results/README.md) for the manifest format, corpus setup, and metric definitions.
+
+## Troubleshooting
+
+<details>
+<summary><b>Alt+Space starts dictation in VS Code, but the text never appears</b></summary>
+
+<br />
+
+Set `"window.customMenuBarAltFocus": false` in VS Code. Releasing Alt can otherwise focus the menu bar. You can also assign a shortcut that avoids Alt in **Shortcuts**.
+
+</details>
+
+<details>
+<summary><b>Shortcuts fail to install</b></summary>
+
+<br />
+
+Confirm that the niri config exists and that the shortcuts are free. If the error refers to native press and release bindings, select **Toggle** mode. If you manage your config by hand, use the [niri snippet](docs/niri.kdl).
+
+</details>
+
+<details>
+<summary><b>The app asks for a model or worker update</b></summary>
+
+<br />
+
+Open **Speech model** and select **Install selected model**. Setup reuses a verified archive when it can. For a model or worker configured at a custom path, repair it in place or switch to a managed profile.
+
+</details>
+
+## Limitations
+
+- The supplied speech profiles support English. The bundled inference runtime targets Linux x86_64.
+- Recordings shorter than 300 ms are rejected. A muted microphone reports digital silence separately from speech detection.
+- Entry into custom text fields and embedded terminals depends on their clipboard shortcuts. Supported editors use **Shift+Insert**, known terminals use **Ctrl+Shift+V**, and other apps use **Ctrl+V**. Disable automatic paste if your target needs a different route.
+- Vocabulary boosting and the optional noise and confidence controls can affect accuracy and latency. Use your own recordings to compare settings. [Benchmark results](docs/eval-results/README.md)
+
+## Documentation
+
+| Guide                                                  | What's in it                                       |
+| :----------------------------------------------------- | :------------------------------------------------- |
+| [Configuration](docs/config.toml)                      | Settings and their defaults                        |
+| [niri integration](docs/niri.kdl)                      | Manual bindings and login startup                  |
+| [Evaluation](docs/eval-results/README.md)              | Reproduction steps, metrics, and benchmark results |
+| [Implementation status](docs/implementation-status.md) | Verification evidence and open work                |
+| [Provenance](docs/third_party.md)                      | Models, runtimes, and third-party notices          |
+
+## Contributing
+
+Issues and pull requests are welcome. Include the app revision, niri version, and reproduction steps in bug reports. Run `make check` and `make check-python` before opening a pull request. [GitHub Issues](https://github.com/Dijo-404/hype_flow/issues)
+
+## License
+
+Project-wide licensing is unspecified. The model, runtime, and reused components have their own terms and notices. [Third-party notices](docs/third_party.md)
+
+## Acknowledgements
+
+- [NVIDIA Parakeet](https://github.com/NVIDIA/NeMo) and [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) for the recognition models and runtime.
+- [OpenWhispr](https://github.com/OpenWhispr/openwhispr) for references on segmentation and editor paste routing.
+- [Handy](https://github.com/cjpais/Handy) for the focus-preserving recording overlay reference.
+
+<br />
+
+<div align="center">
+  <sub>Built by <a href="https://github.com/Dijo-404">Dijo-404</a> · <a href="#readme-top">Back to top</a></sub>
+</div>

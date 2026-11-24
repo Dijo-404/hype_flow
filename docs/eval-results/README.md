@@ -133,8 +133,7 @@ uses the same clips. The [reference-hotword sanity check](public-hotword-sanity.
 reports aggregate errors across six clips with at most 30 reference terms.
 Sample size and desktop load limit runtime and default-setting conclusions.
 
-The noise and silence sample uses one public clip per set with sweep seed
-20261015. Each clip produces five variants. The results cover [baseline](public-augmented-baseline.json),
+The noise and silence sample uses one public clip per set with sweep seed 20261015. Each clip produces five variants. The results cover [baseline](public-augmented-baseline.json),
 [gain](public-augmented-gain.json), [denoiser](public-augmented-denoise.json),
 [VAD off](public-augmented-vad-off.json), and
 [VAD off with denoiser](public-augmented-vad-off-denoise.json). The same source

@@ -55,17 +55,17 @@ warm-up. Order alternated, host caches were left alone, the model and C worker
 were identical, and capture used the same prerecorded audio. Values are
 medians; full samples/ranges are retained in the development evidence.
 
-| Metric | Python | Rust/GTK4 | Observed change |
-| --- | ---: | ---: | ---: |
-| Model-free process-tree PSS | 40621 KiB | 28235 KiB | -30.5% |
-| Model-free process-tree RSS | 100548 KiB | 61484 KiB | -38.9% |
-| Loaded process-tree PSS | 1497274 KiB | 1443804 KiB | -3.6% |
-| Loaded startup to ready | 4822 ms | 4795 ms | -0.6% |
-| Startup to setup prompt | 361 ms | 381 ms | +5.3% |
-| Shortcut to first captured frame | 318 ms | 168 ms | -47.0% |
-| Capture end to pasted completion | 1315 ms | 1171 ms | -11.0% |
-| Decode/cleanup subphase | 971 ms | 814 ms | -16.2% |
-| Delivery subphase | 241 ms | 331 ms | +37.4% |
+| Metric                           |      Python |   Rust/GTK4 | Observed change |
+| -------------------------------- | ----------: | ----------: | --------------: |
+| Model-free process-tree PSS      |   40621 KiB |   28235 KiB |          -30.5% |
+| Model-free process-tree RSS      |  100548 KiB |   61484 KiB |          -38.9% |
+| Loaded process-tree PSS          | 1497274 KiB | 1443804 KiB |           -3.6% |
+| Loaded startup to ready          |     4822 ms |     4795 ms |           -0.6% |
+| Startup to setup prompt          |      361 ms |      381 ms |           +5.3% |
+| Shortcut to first captured frame |      318 ms |      168 ms |          -47.0% |
+| Capture end to pasted completion |     1315 ms |     1171 ms |          -11.0% |
+| Decode/cleanup subphase          |      971 ms |      814 ms |          -16.2% |
+| Delivery subphase                |      241 ms |      331 ms |          +37.4% |
 
 Settings are created when first opened, reducing background memory. Pidfd
 exit notifications avoid unnecessary waits after helper processes close their
@@ -138,14 +138,14 @@ and five alternating corpus pairs, with both workers resident for decode.
 Values below are medians with minimum–maximum ranges in milliseconds. The
 three-clip corpus total includes its silence clip.
 
-| Measurement | C worker | Rust worker |
-| --- | ---: | ---: |
-| Startup to ready | 4518.9 (4275.4–4791.9) | 4554.6 (4244.8–4700.0) |
-| Greedy corpus decode | 3373.5 (3164.9–3547.6) | 3297.4 (3211.9–3660.3) |
-| Boosting corpus decode | 4032.4 (3779.4–4208.9) | 4000.7 (3611.7–4088.4) |
-| VAD corpus decode | 4090.8 (3799.4–4411.3) | 3862.2 (3723.2–4129.3) |
+| Measurement             |               C worker |            Rust worker |
+| ----------------------- | ---------------------: | ---------------------: |
+| Startup to ready        | 4518.9 (4275.4–4791.9) | 4554.6 (4244.8–4700.0) |
+| Greedy corpus decode    | 3373.5 (3164.9–3547.6) | 3297.4 (3211.9–3660.3) |
+| Boosting corpus decode  | 4032.4 (3779.4–4208.9) | 4000.7 (3611.7–4088.4) |
+| VAD corpus decode       | 4090.8 (3799.4–4411.3) | 3862.2 (3723.2–4129.3) |
 | Denoising corpus decode | 5675.6 (5325.4–6042.0) | 5644.5 (5301.8–5933.7) |
-| Combined corpus decode | 5569.7 (5207.6–6212.8) | 5726.5 (5113.0–6116.9) |
+| Combined corpus decode  | 5569.7 (5207.6–6212.8) | 5726.5 (5113.0–6116.9) |
 
 Ranges overlap throughout. These observations establish no reproducible worker
 timing regression outside the measured variation, and no reliable inference

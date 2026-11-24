@@ -34,18 +34,10 @@ pub fn formatted(text: &str) -> Vec<String> {
 pub fn whisper(texts: &[&str]) -> Result<Vec<Vec<String>>> {
     let basic = include_str!("../../../tools/normalizers/basic.py");
     let english = include_str!("../../../tools/normalizers/english.py")
-        .replace("from .basic import remove_symbols_and_diacritics", "")
-        .replace(
-            "mapping_path = os.path.join(os.path.dirname(__file__), \"english.json\")",
-            "",
-        )
-        .replace(
-            "self.mapping = json.load(open(mapping_path))",
-            "self.mapping = SPELLINGS",
-        );
+        .replace("from .basic import remove_symbols_and_diacritics", "");
     let mapping = serde_json::to_string(include_str!("../../../tools/normalizers/english.json"))?;
     let script = format!(
-        "import json, sys\n{basic}\nSPELLINGS = json.loads({mapping})\n{english}\nnormalizer = EnglishTextNormalizer()\nprint(json.dumps([normalizer(s).split() for s in json.load(sys.stdin)]))"
+        "import json, sys\n{basic}\n{english}\nnormalizer = EnglishTextNormalizer(json.loads({mapping}))\nprint(json.dumps([normalizer(s).split() for s in json.load(sys.stdin)]))"
     );
     let mut child = Command::new("python3")
         .args(["-I", "-S", "-c", &script])

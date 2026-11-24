@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run only in an isolated D-Bus session and a controlled Wayland compositor.
 set -eu
-project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project"
 cargo_bin=${CARGO:-"$HOME/.cargo/bin/cargo"}
 export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
