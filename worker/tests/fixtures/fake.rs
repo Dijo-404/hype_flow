@@ -171,8 +171,9 @@ unsafe extern "C" fn SherpaOnnxCreateVoiceActivityDetector(
     assert_eq!(silero.min_silence_duration, 0.45);
     assert_eq!(silero.min_speech_duration, 0.06);
     assert_eq!(silero.window_size, 512);
-    assert_eq!(silero.max_speech_duration, 60.0);
-    assert_eq!(buffer_seconds, 65.0);
+    // The worker's default 20-second piece bounds speech and the VAD buffer.
+    assert_eq!(silero.max_speech_duration, 20.0);
+    assert_eq!(buffer_seconds, 25.0);
     handle()
 }
 

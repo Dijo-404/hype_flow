@@ -298,6 +298,8 @@ impl<'api> Decoder<'api> {
         )
         .context("initialize offline recognizer")?;
         let vad = if let Some(model) = &options.vad {
+            // App requests are at most one piece, so VAD never enters long-speech mode or regrows.
+            let piece = options.max_piece_seconds as f32;
             let config = SherpaOnnxVadModelConfig {
                 silero_vad: SherpaOnnxSileroVadModelConfig {
                     model: model.as_ptr(),
@@ -305,7 +307,7 @@ impl<'api> Decoder<'api> {
                     min_silence_duration: options.vad_min_silence,
                     min_speech_duration: 0.06,
                     window_size: VAD_WINDOW as i32,
-                    max_speech_duration: 60.0,
+                    max_speech_duration: piece,
                 },
                 sample_rate: SAMPLE_RATE,
                 num_threads: 1,
@@ -315,7 +317,7 @@ impl<'api> Decoder<'api> {
             Some(
                 Native::new(
                     api,
-                    unsafe { (api.SherpaOnnxCreateVoiceActivityDetector)(&config, 65.0) },
+                    unsafe { (api.SherpaOnnxCreateVoiceActivityDetector)(&config, piece + 5.0) },
                     api.SherpaOnnxDestroyVoiceActivityDetector,
                 )
                 .context("initialize voice activity detector")?,
