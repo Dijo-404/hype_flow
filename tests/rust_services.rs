@@ -135,7 +135,7 @@ fn exercise_services(root: &Path) {
         &bin.join("niri"),
         r#"case "$1:$2:$3" in
         msg:--json:focused-window)
-            if [ -f "$HOME/new-selection" ]; then mv "$HOME/new-selection" "$HOME/clipboard"; fi
+            printf 'niri\n' >> "$HOME/spawned"
             cat "$HOME/focus" ;;
         msg:action:focus-window)
             [ ! -f "$HOME/closed" ] || exit 1
@@ -152,7 +152,8 @@ fn exercise_services(root: &Path) {
     );
     executable(
         &bin.join("wl-paste"),
-        r#"selection_file="$HOME/clipboard"
+        r#"printf 'wl-paste\n' >> "$HOME/spawned"
+        selection_file="$HOME/clipboard"
         if [ "$1" = --primary ]; then selection_file="$HOME/primary"; shift; fi
         if [ ! -f "$selection_file" ]; then echo 'Nothing is copied' >&2; exit 1; fi
         case "$*" in
@@ -173,6 +174,7 @@ fn exercise_services(root: &Path) {
         --clear) rm -f "$selection_file" ;;
         '--type text/plain;charset=utf-8')
             cat > "$selection_file"
+            if [ -f "$HOME/new-selection" ]; then mv "$HOME/new-selection" "$selection_file"; fi
             if [ -f "$HOME/held-stderr" ]; then
                 (while [ -f "$HOME/held-stderr" ]; do sleep 0.02; done) </dev/null >/dev/null &
             fi ;;
@@ -205,6 +207,15 @@ fn exercise_services(root: &Path) {
 
     output::deliver("first rapid paste", Some(&firefox), true, false, false).unwrap();
     output::deliver("second rapid paste", Some(&firefox), true, false, false).unwrap();
+    output::finish_pending();
+    assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
+    fs::remove_file(root.join("spawned")).unwrap();
+    output::deliver("checked once", Some(&firefox), true, false, false).unwrap();
+    // Save the clipboard, confirm it still holds the transcript, then check focus once.
+    assert_eq!(
+        fs::read_to_string(root.join("spawned")).unwrap(),
+        "wl-paste\nwl-paste\nwl-paste\nniri\n"
+    );
     output::finish_pending();
     assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
 

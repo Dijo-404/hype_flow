@@ -463,32 +463,31 @@ pub fn deliver_guarded_until(
     wait_for_modifiers(modifier_release_guard, &cancelled)?;
     ensure!(!cancelled(), "Clipboard delivery cancelled");
     let id = target.and_then(window_id);
-    if !id.is_some_and(|id| same_focus(id) || refocus(id)) {
-        copy_text(&transcript, true)?;
-        return Ok("Copied · focus changed".to_owned());
-    }
-    if !still_selected(&transcript, false) {
-        copy_text(&transcript, true)?;
-        return Ok("Copied · clipboard changed".to_owned());
-    }
-    if !id.is_some_and(same_focus) {
-        copy_text(&transcript, true)?;
-        return Ok("Copied · focus changed".to_owned());
-    }
-    ensure!(!cancelled(), "Clipboard delivery cancelled");
+    // Check selections, then focus once before typing; Shift+Insert checks after setting primary.
+    let focused = || id.is_some_and(|id| same_focus(id) || refocus(id));
     let app_id = target
         .and_then(|window| window.get("app_id"))
         .and_then(Value::as_str)
         .unwrap_or_default();
     let terminal = is_terminal(app_id);
-    if use_shift_insert(app_id) {
+    let shift_insert = use_shift_insert(app_id);
+    if !shift_insert && !still_selected(&transcript, false) {
+        copy_text(&transcript, true)?;
+        return Ok("Copied · clipboard changed".to_owned());
+    }
+    if !shift_insert && !focused() {
+        copy_text(&transcript, true)?;
+        return Ok("Copied · focus changed".to_owned());
+    }
+    ensure!(!cancelled(), "Clipboard delivery cancelled");
+    if shift_insert {
         let mut primary = PRIMARY.lock().unwrap_or_else(|error| error.into_inner());
         let previous_primary = replace_selection(&transcript, true, true, &mut primary)?;
         let pasted: Result<bool> = (|| {
             ensure!(!cancelled(), "Clipboard delivery cancelled");
             if !still_selected(&transcript, true)
                 || !still_selected(&transcript, false)
-                || !id.is_some_and(same_focus)
+                || !focused()
             {
                 return Ok(false);
             }
