@@ -19,7 +19,7 @@ release:
 	$(CARGO) build --release --workspace
 
 check-desktop:
-	sh tools/check-desktop.sh
+	CARGO="$(CARGO)" sh tools/check-desktop.sh
 
 install: release
 	sh tools/install.sh
