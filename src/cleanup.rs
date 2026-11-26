@@ -758,16 +758,17 @@ mod product_tests {
             ..Config::default()
         };
         assert_eq!(process("foo um", &values).unwrap(), "bar");
+        // One key field per step, so a field missing from the key fails its own step.
         values.corrections = "foo => baz".into();
         assert_eq!(process("foo um", &values).unwrap(), "baz");
-        values.auto_correct = false;
-        values.filter_words = false;
-        assert_eq!(process("foo um", &values).unwrap(), "foo um");
-        values.auto_correct = true;
-        values.filter_words = true;
-        values.corrections.clear();
-        values.blocked_words = "foo".into();
+        values.blocked_words = "baz".into();
         assert_eq!(process("foo um", &values).unwrap(), "um");
+        values.filter_words = false;
+        assert_eq!(process("foo um", &values).unwrap(), "baz um");
+        values.prompt = "Kubernetes".into();
+        assert_eq!(process("kubernetes", &values).unwrap(), "Kubernetes");
+        values.auto_correct = false;
+        assert_eq!(process("kubernetes", &values).unwrap(), "kubernetes");
     }
     #[test]
     fn confidence_only_permits_low_confidence_unambiguous_words() {
