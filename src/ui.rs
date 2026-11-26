@@ -945,12 +945,16 @@ impl Home {
             }
         });
         let weak = Rc::downgrade(&home);
-        home.window.add_tick_callback(move |window, _| {
-            let Some(home) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            home.resize_layout(window.width());
-            glib::ControlFlow::Continue
+        home.window.connect_realize(move |window| {
+            let weak = weak.clone();
+            // Fires on the first size and on interactive, tiled and maximized resizes.
+            if let Some(surface) = window.surface() {
+                surface.connect_width_notify(move |surface| {
+                    if let Some(home) = weak.upgrade() {
+                        home.resize_layout(surface.width());
+                    }
+                });
+            }
         });
         home.navigation
             .select_row(home.navigation.row_at_index(0).as_ref());
@@ -1144,12 +1148,26 @@ struct PillState {
     began: i64,
     width: f64,
     target: f64,
+    input: [i32; 4],
+}
+
+impl PillState {
+    fn animating(&self, animated: bool) -> bool {
+        self.phase == "recording"
+            || self.width != self.target
+            || (animated && matches!(self.phase.as_str(), "transcribing" | "delivering"))
+    }
+}
+
+fn animations() -> bool {
+    gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations())
 }
 
 pub struct Overlay {
     pub window: gtk::Window,
     area: gtk::DrawingArea,
     state: Rc<RefCell<PillState>>,
+    ticking: Rc<Cell<bool>>,
 }
 
 impl Overlay {
@@ -1196,6 +1214,7 @@ impl Overlay {
             began: 0,
             width: 270.0,
             target: 270.0,
+            input: [0; 4],
         }));
         let draw_state = state.clone();
         area.set_draw_func(move |area, cr, width, height| {
@@ -1206,9 +1225,9 @@ impl Overlay {
                 state.levels[10] = state.volume;
                 state.last_sample = now;
             }
-            let animated =
-                gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations());
-            if animated {
+            let animated = animations();
+            // Snap the last half pixel so the tick callback can stop.
+            if animated && (state.target - state.width).abs() > 0.5 {
                 state.width += (state.target - state.width) * 0.2;
             } else {
                 state.width = state.target;
@@ -1217,15 +1236,15 @@ impl Overlay {
             let h = 48.0;
             let x = (width as f64 - w) / 2.0;
             let y = (height as f64 - h) / 2.0;
-            let surface = area.native().and_then(|native| native.surface());
-            if let Some(surface) = surface {
+            let input = [x as i32, y as i32, w.ceil() as i32, h as i32];
+            if state.input != input
+                && let Some(surface) = area.native().and_then(|native| native.surface())
+            {
                 let region = gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
-                    x as i32,
-                    y as i32,
-                    w.ceil() as i32,
-                    h as i32,
+                    input[0], input[1], input[2], input[3],
                 ));
                 surface.set_input_region(Some(&region));
+                state.input = input;
             }
             if matches!(state.phase.as_str(), "transcribing" | "delivering") {
                 let angle = if animated {
@@ -1330,14 +1349,11 @@ impl Overlay {
             }
         });
         area.add_controller(gesture);
-        area.add_tick_callback(|area, _| {
-            area.queue_draw();
-            glib::ControlFlow::Continue
-        });
         Ok(Self {
             window,
             area,
             state,
+            ticking: Rc::new(Cell::new(false)),
         })
     }
 
@@ -1366,7 +1382,22 @@ impl Overlay {
             message
         }));
         self.window.set_visible(visible);
+        let animating = visible && state.animating(animations());
+        drop(state);
         self.area.queue_draw();
+        if animating && !self.ticking.replace(true) {
+            let state = self.state.clone();
+            let ticking = self.ticking.clone();
+            self.area.add_tick_callback(move |area, _| {
+                area.queue_draw();
+                if area.is_mapped() && state.borrow().animating(animations()) {
+                    glib::ControlFlow::Continue
+                } else {
+                    ticking.set(false);
+                    glib::ControlFlow::Break
+                }
+            });
+        }
     }
 }
 
@@ -1388,4 +1419,36 @@ fn capsule(cr: &gtk::cairo::Context, x: f64, y: f64, width: f64, height: f64) {
         3.0 * std::f64::consts::FRAC_PI_2,
     );
     cr.close_path();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_ticks_only_while_something_moves() {
+        let mut pill = PillState {
+            phase: "idle".into(),
+            message: "Ready".into(),
+            volume: 0.0,
+            duration: 0.0,
+            levels: [0.0; 11],
+            last_sample: 0,
+            began: 0,
+            width: 310.0,
+            target: 310.0,
+            input: [0; 4],
+        };
+        assert!(!pill.animating(true));
+        pill.target = 114.0;
+        assert!(pill.animating(true));
+        pill.phase = "recording".into();
+        pill.width = 114.0;
+        assert!(pill.animating(false));
+        pill.phase = "transcribing".into();
+        pill.width = 48.0;
+        pill.target = 48.0;
+        assert!(pill.animating(true));
+        assert!(!pill.animating(false));
+    }
 }
