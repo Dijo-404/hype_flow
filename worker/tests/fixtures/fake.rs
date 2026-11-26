@@ -122,6 +122,8 @@ unsafe extern "C" fn SherpaOnnxGetOfflineStreamResult(
         if RESULTS.fetch_add(1, Relaxed) == 0 {
             "{\"text\":\"\"}".to_owned()
         } else {
+            // The retry decodes the whole input, not the VAD-trimmed audio again.
+            assert_eq!(samples.len(), 20_000);
             "{\"text\":\"recovered\"}".to_owned()
         }
     } else if mode("oversize-result") {

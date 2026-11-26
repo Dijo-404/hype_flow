@@ -229,9 +229,9 @@ fn boosted_denoised_audio_is_windowed_and_overlapping_padding_is_deduplicated() 
     assert_released(
         &output,
         &[
-            "segment",
-            "segment",
             "audio",
+            "segment",
+            "segment",
             "result",
             "stream",
             "vad",
@@ -423,17 +423,21 @@ fn low_memory_model_can_select_eighty_feature_bins() {
 }
 
 #[test]
-fn audible_empty_recognition_retries_exactly_once() {
-    for retry in [false, true] {
+fn audible_empty_recognition_retries_once_only_when_vad_trimmed_audio() {
+    // Without VAD the retry would decode identical audio, so it is skipped.
+    for (vad, retry) in [(true, false), (true, true), (false, true)] {
         let stage = staged_worker();
         let mut command = worker(&stage);
         command
             .env("FAKE_SHERPA_MODE", "empty-first")
-            .args(["model", "2"]);
+            .args(["model", "2", "--denoise", "denoise"]);
+        if vad {
+            command.args(["--vad", "vad"]);
+        }
         if retry {
             command.arg("--soft-speech-retry");
         }
-        let output = run(command, &pcm(&vec![1000; 1600]));
+        let output = run(command, &pcm(&(0..20_000).collect::<Vec<_>>()));
         assert!(
             output.status.success(),
             "{}",
@@ -442,9 +446,10 @@ fn audible_empty_recognition_retries_exactly_once() {
         let mut stdout = output.stdout.as_slice();
         assert_eq!(frame(&mut stdout), READY);
         let result = frame(&mut stdout);
+        let retried = vad && retry;
         assert_eq!(
             result,
-            if retry {
+            if retried {
                 &b"{\"text\":\"recovered\"}"[..]
             } else {
                 &b"{\"text\":\"\"}"[..]
@@ -454,7 +459,7 @@ fn audible_empty_recognition_retries_exactly_once() {
             String::from_utf8_lossy(&output.stderr)
                 .matches("drop stream")
                 .count(),
-            if retry { 2 } else { 1 }
+            if retried { 2 } else { 1 }
         );
     }
 }
