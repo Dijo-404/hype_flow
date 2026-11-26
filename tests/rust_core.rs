@@ -281,6 +281,7 @@ fn check_config_paths(root: &std::path::Path) {
     assert_eq!(values.boost_score, 2.0);
     assert!(!values.paste);
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    assert!(Config::from_table(toml::from_str("gpu = false").unwrap()).is_ok());
 
     values.model = root.join("custom/model").display().to_string();
     values.server = root.join("custom/recognizer").display().to_string();

@@ -179,6 +179,8 @@ impl Default for Config {
 
 impl Config {
     pub fn from_table(mut supplied: toml::Table) -> Result<Self> {
+        // Older configurations carry an unused gpu flag.
+        supplied.remove("gpu");
         let variant = match supplied.get("model").and_then(toml::Value::as_str) {
             Some(model) => setup::variant_for_path(Path::new(model)),
             None => supplied
