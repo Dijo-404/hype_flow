@@ -1,5 +1,5 @@
 //! Opt-in audio recovery. No audio is persisted unless enabled in settings.
-use crate::backend::{PCM_LIMIT, wav_bytes};
+use crate::backend::{PCM_LIMIT, pcm_from_wav, wav_bytes};
 use anyhow::{Context, Result, ensure};
 use std::{
     env,
@@ -197,21 +197,7 @@ pub fn last(kind: &str) -> Result<Vec<u8>> {
         metadata.is_file() && metadata.uid() == unsafe { libc::getuid() },
         "Unsafe saved recording"
     );
-    let mut audio = hound::WavReader::new(file)?;
-    let spec = audio.spec();
-    ensure!(
-        spec.channels == 1
-            && spec.sample_rate == 16_000
-            && spec.bits_per_sample == 16
-            && spec.sample_format == hound::SampleFormat::Int
-            && audio.duration() as usize <= PCM_LIMIT / 2,
-        "Invalid saved recording WAV"
-    );
-    let mut pcm = Vec::with_capacity(audio.duration() as usize * 2);
-    for sample in audio.samples::<i16>() {
-        pcm.extend_from_slice(&sample?.to_le_bytes());
-    }
-    Ok(pcm)
+    pcm_from_wav(file).context("Invalid saved recording WAV")
 }
 
 #[cfg(test)]

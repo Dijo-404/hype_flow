@@ -6,6 +6,7 @@ use crate::vocabulary::hotwords;
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 use std::env;
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -77,7 +78,12 @@ pub fn wav_bytes(pcm: &[u8]) -> Vec<u8> {
 }
 
 pub fn read_wav(path: &Path) -> Result<Vec<u8>> {
-    let mut audio = hound::WavReader::open(path).context("Could not read PCM WAV")?;
+    pcm_from_wav(File::open(path).context("Could not read PCM WAV")?)
+}
+
+pub(crate) fn pcm_from_wav(reader: impl Read) -> Result<Vec<u8>> {
+    let mut audio =
+        hound::WavReader::new(io::BufReader::new(reader)).context("Could not read PCM WAV")?;
     let spec = audio.spec();
     ensure!(
         spec.channels == 1
