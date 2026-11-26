@@ -316,5 +316,15 @@
     "input": "twenty, um, five dollars",
     "settings": { "format_numbers": true },
     "output": "$25"
+  },
+  {
+    "input": "lınux rocks",
+    "settings": { "prompt": "Linux" },
+    "output": "lınux rocks"
+  },
+  {
+    "input": "say hı now",
+    "settings": { "corrections": "hi => hello" },
+    "output": "say hı now"
   }
 ]

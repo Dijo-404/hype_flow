@@ -145,11 +145,12 @@ impl Replacements {
     fn apply(&self, text: &str) -> Result<String> {
         edit_matches(text, &self.pattern, |matched, output| {
             let key = casefold(&normalize_spaces(matched));
-            let replacement = self
-                .values
-                .get(key.as_str())
-                .with_context(|| format!("No correction for {matched:?} after case folding"))?;
-            output.push_str(replacement);
+            // The pattern also lets "i" match "ı", which case folding keeps apart.
+            output.push_str(
+                self.values
+                    .get(key.as_str())
+                    .map_or(matched, String::as_str),
+            );
             Ok(())
         })
     }
