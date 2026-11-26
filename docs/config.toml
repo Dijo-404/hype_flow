@@ -1,6 +1,6 @@
 # Copy to ~/.config/hype-flow/config.toml. Every key is optional.
 language = "en"
-model_variant = "parakeet-ctc"  # or "low-memory" (TDT) or "unified"; next download
+model_variant = "unified"  # or "low-memory" (TDT) or "parakeet-ctc"; next download
 # These models support English. "auto" is accepted for old configurations.
 input_target = "auto"
 paste = true

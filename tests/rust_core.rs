@@ -210,11 +210,11 @@ fn check_config_paths(root: &std::path::Path) {
     assert_eq!(
         defaults.model,
         directory
-            .join("models/parakeet-110m-ctc-en-int8")
+            .join("models/parakeet-unified-en-int8")
             .to_string_lossy()
     );
-    assert_eq!(defaults.model_variant, "parakeet-ctc");
-    assert_eq!(defaults.feature_dim, 80);
+    assert_eq!(defaults.model_variant, "unified");
+    assert_eq!(defaults.feature_dim, 128);
     assert_eq!(
         defaults.server,
         directory

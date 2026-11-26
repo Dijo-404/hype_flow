@@ -187,16 +187,13 @@ impl Config {
                 .get("model_variant")
                 .and_then(toml::Value::as_str)
                 .unwrap_or_else(|| {
+                    // 80 features without a variant meant the earlier 110M CTC default.
                     if supplied
                         .get("feature_dim")
                         .and_then(toml::Value::as_integer)
-                        == Some(128)
-                        || supplied
-                            .get("vocabulary_boosting")
-                            .and_then(toml::Value::as_bool)
-                            == Some(true)
+                        == Some(80)
                     {
-                        "unified"
+                        "parakeet-ctc"
                     } else {
                         setup::DEFAULT_MODEL_VARIANT
                     }

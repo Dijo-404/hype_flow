@@ -36,6 +36,8 @@ def inside(root, low_memory_archive, ctc_archive):
         initial += 'model = "/test/previous-model"\nserver = "/test/previous-worker"\n'
     if low_memory_archive:
         initial += 'model_variant = "low-memory"\n'
+    if ctc_archive:
+        initial += 'model_variant = "parakeet-ctc"\n'
     config.write_text(initial)
     tools = root / "no-compiler"
     tools.mkdir()

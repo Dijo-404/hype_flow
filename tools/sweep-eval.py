@@ -152,10 +152,8 @@ def session_configurations(args, root):
     if "model" in values:
         original = Path(values["model"]).expanduser().resolve()
     else:
-        legacy = values.get("feature_dim") == 128 or values.get(
-            "vocabulary_boosting", False
-        )
-        variant = values.get("model_variant", "unified" if legacy else "parakeet-ctc")
+        legacy = values.get("feature_dim") == 80
+        variant = values.get("model_variant", "parakeet-ctc" if legacy else "unified")
         name = {
             "unified": "parakeet-unified-en-int8",
             "low-memory": "parakeet-110m-en-int8",
