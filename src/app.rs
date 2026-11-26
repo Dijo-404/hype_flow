@@ -103,6 +103,28 @@ fn write_private(path: &std::path::Path, text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Settings the speech worker reads at startup; changing one restarts it.
+fn worker_changed(old: &Config, new: &Config) -> bool {
+    old.model != new.model
+        || old.server != new.server
+        || old.language != new.language
+        || old.threads != new.threads
+        || old.blank_penalty != new.blank_penalty
+        || old.max_active_paths != new.max_active_paths
+        || old.vad_threshold != new.vad_threshold
+        || old.vad_min_silence != new.vad_min_silence
+        || old.max_piece_seconds != new.max_piece_seconds
+        || old.vocabulary_boosting != new.vocabulary_boosting
+        || new.vocabulary_boosting
+            && (old.prompt != new.prompt || old.boost_score != new.boost_score)
+        || old.cut_silence != new.cut_silence
+        || old.noise_suppression != new.noise_suppression
+        || old.normalize_gain != new.normalize_gain
+        || old.feature_dim != new.feature_dim
+        || old.provider != new.provider
+        || old.soft_speech_retry != new.soft_speech_retry
+}
+
 fn finish_recognition(
     transcript: crate::backend::Transcription,
     values: &Config,
@@ -507,27 +529,7 @@ impl AppState {
             }
             return false;
         }
-        let old = &self.values;
-        let reload = old.model != values.model
-            || old.server != values.server
-            || old.language != values.language
-            || old.threads != values.threads
-            || old.blank_penalty != values.blank_penalty
-            || old.max_active_paths != values.max_active_paths
-            || old.vad_threshold != values.vad_threshold
-            || old.vad_min_silence != values.vad_min_silence
-            || old.max_piece_seconds != values.max_piece_seconds
-            || old.prompt != values.prompt
-            || old.vocabulary_boosting != values.vocabulary_boosting
-            || old.boost_score != values.boost_score
-            || old.cut_silence != values.cut_silence
-            || old.noise_suppression != values.noise_suppression
-            || old.normalize_gain != values.normalize_gain
-            || old.feature_dim != values.feature_dim
-            || old.provider != values.provider
-            || old.soft_speech_retry != values.soft_speech_retry
-            || old.hallucination_filtering != values.hallucination_filtering
-            || old.anomaly_threshold != values.anomaly_threshold;
+        let reload = worker_changed(&self.values, &values);
         self.values = values;
         if let Some(timer) = self.unloading.take() {
             timer.remove();
@@ -535,19 +537,22 @@ impl AppState {
         if !self.values.keep_mic_ready {
             audio::release();
         }
+        let mut last = self.last.clone();
         if reload || !self.session.ready {
             self.session.generation += 1;
             self.live.store(self.session.generation, Ordering::Release);
             self.workers.push(self.engine.stop_in_background());
             self.engine = Arc::new(Engine::new(self.values.clone(), self.runtime.clone()));
             if setup::assets_ready(&self.values) {
-                self.warm();
+                // Load lazily like startup; a bad setting surfaces on the next dictation.
+                self.session.ready = true;
+                self.session.unloaded = true;
+                last = ("idle", "Ready".into(), false, 0.0, 0.0);
             }
         }
         if let Some(home) = &self.home {
             home.feedback("Settings saved");
         }
-        let last = self.last.clone();
         let message = if shortcuts_changed {
             format!(
                 "Shortcuts saved. {} starts dictation.",
@@ -1132,5 +1137,38 @@ mod finish_tests {
         assert!(cleaned.is_empty());
         assert!(notice.unwrap().contains("original saved"));
         assert!(finish_recognition(transcript, &values, || true).is_err());
+    }
+
+    #[test]
+    fn only_settings_the_worker_reads_restart_it() {
+        let old = Config {
+            vocabulary_boosting: false,
+            ..Config::default()
+        };
+        let app_only = Config {
+            hallucination_filtering: !old.hallucination_filtering,
+            anomaly_threshold: old.anomaly_threshold + 1.0,
+            prompt: "Hype Flow".into(),
+            boost_score: old.boost_score + 1.0,
+            ..old.clone()
+        };
+        assert!(!worker_changed(&old, &app_only));
+        let boosted = Config {
+            vocabulary_boosting: true,
+            ..old.clone()
+        };
+        assert!(worker_changed(&old, &boosted));
+        for changed in [
+            Config {
+                prompt: "Hype Flow".into(),
+                ..boosted.clone()
+            },
+            Config {
+                boost_score: boosted.boost_score + 1.0,
+                ..boosted.clone()
+            },
+        ] {
+            assert!(worker_changed(&boosted, &changed));
+        }
     }
 }
