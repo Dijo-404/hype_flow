@@ -7,7 +7,7 @@ to build, in order, to improve accuracy, latency and memory use. Every claim
 was checked against source code. Each effect is labelled by where its number
 comes from:
 
-- **Measured**: Hype Flow's own numbers, from `docs/migration-results.md` or
+- **Measured**: Hype Flow's own numbers, from `docs/migration.md` or
   from probes run while writing this plan.
 - **Upstream**: a number published by another project, for another model or
   machine.
@@ -79,7 +79,7 @@ comes from:
 | Delivery            | Clipboard, fixed 180 ms wait, focus check, paste key by app, restore after 800 ms only if unchanged             | `src/output.rs:42, 213, 336-346`                         |
 | Idle unload         | Default 10 min; choices 0/5/10/15/30/60                                                                         | `src/config.rs:15, 124`                                  |
 
-### Baseline (measured; medians from `docs/migration-results.md`)
+### Baseline (measured; medians from `docs/migration.md`)
 
 | Metric                           |        Value |
 | -------------------------------- | -----------: |
@@ -719,7 +719,7 @@ Paths are relative to `/home/dj/tmp-whisper/<project>/` unless they start with
 ## Implementation follow-through
 
 Current code, measurements, deviations and remaining evidence gates are tracked
-in [implementation-status.md](implementation-status.md). Evaluation commands and
+in [status.md](status.md). Evaluation commands and
 summary formats are documented in [eval-results/README.md](eval-results/README.md).
 
 ### Remaining work
@@ -727,7 +727,7 @@ summary formats are documented in [eval-results/README.md](eval-results/README.m
 - **A2, A8.** CTC preserves interior pauses and uses a fixed 32 ms digital
   lead-in with silence cutting enabled. Other silence variants can still
   differ in words, case, or punctuation. The remaining comparisons and
-  long-form scores are tracked in [CTC pause preservation](implementation-status.md#ctc-pause-preservation).
+  long-form scores are tracked in [CTC pause preservation](status.md#ctc-pause-preservation).
 - **Step 0, A1, A3, A5–A7, A9, L3.** Personal and jargon accuracy are still
   open after the public-only pass. Larger paired runs on the default model
   are needed to tune quiet-input gain, VAD, denoising, and thread count.

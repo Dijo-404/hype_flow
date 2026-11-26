@@ -46,13 +46,13 @@ Upstream: [sherpa-onnx v1.13.8](https://github.com/k2-fsa/sherpa-onnx/releases/t
 - Only native libraries and the C header are installed; the bundled command-line programs are not copied.
 - The Rust worker uses checked-in dynamic API bindings generated from the pinned C header. First-use setup stages the shipped worker; it does not compile C. No Python model framework, Torch, CUDA toolkit, or WebSocket dependency is needed.
 
-Sherpa-onnx's Apache 2.0 license: [licenses/sherpa_onnx.txt](licenses/sherpa_onnx.txt). ONNX Runtime's MIT notice is retained at [licenses/onnxruntime.txt](licenses/onnxruntime.txt), from its [upstream license](https://github.com/microsoft/onnxruntime/blob/main/LICENSE).
+Sherpa-onnx's Apache 2.0 license: [licenses/sherpa-onnx.txt](licenses/sherpa-onnx.txt). ONNX Runtime's MIT notice is retained at [licenses/onnxruntime.txt](licenses/onnxruntime.txt), from its [upstream license](https://github.com/microsoft/onnxruntime/blob/main/LICENSE).
 
 ## Handy and earlier Whisper backend
 
 Handy reference checkout: `4807c21a7bb9a3bf2d52578a9b541e165b6bc8b9`. The overlay follows `src-tauri/src/overlay.rs`: a layer-shell surface without keyboard focus or an exclusive zone. Handy's MIT license: [licenses/handy.txt](licenses/handy.txt).
 
-The initial prototype used OpenWhispr's whisper.cpp release `0.0.11` with full large-v3 weights. Parakeet replaces that runtime as the default. Existing model downloads are left intact, and previous default config paths migrate in memory while custom paths and preferences are preserved. The earlier whisper.cpp MIT notice is retained at [licenses/whisper_cpp.txt](licenses/whisper_cpp.txt).
+The initial prototype used OpenWhispr's whisper.cpp release `0.0.11` with full large-v3 weights. Parakeet replaces that runtime as the default. Existing model downloads are left intact, and previous default config paths migrate in memory while custom paths and preferences are preserved. The earlier whisper.cpp MIT notice is retained at [licenses/whisper-cpp.txt](licenses/whisper-cpp.txt).
 
 ## Rust application migration
 
@@ -61,7 +61,7 @@ the desktop interface. `Cargo.lock` records the
 exact Rust dependency versions. GTK4 and GTK4 layer-shell replace the prior
 GTK3 bindings; model and inference-runtime provenance above remains unchanged.
 The Rust worker uses the same pinned sherpa-onnx API and ONNX Runtime native
-libraries as the previous C worker. [Migration results](migration-results.md)
+libraries as the previous C worker. [Migration results](migration.md)
 record verification and the revision containing the original source.
 
 Clipboard sensitivity uses `wl-copy --sensitive` from wl-clipboard 2.3 or
@@ -77,7 +77,7 @@ the checked-in bindings and require neither a generator nor installed model file
 
 ```sh
 cargo install bindgen-cli --version 0.72.1 --locked
-sh tools/generate-worker-bindings.sh /path/to/sherpa-onnx/c-api/c-api.h
+sh tools/bindings.sh /path/to/sherpa-onnx/c-api/c-api.h
 ```
 
 The script verifies the header digest, derives the 21-function allowlist from
@@ -119,7 +119,7 @@ adapt Voxtype's guarded processing at commit
 function-word exclusions, whole-rewrite reconciliation and ordinary-word guards.
 Number conversion uses Apache-2.0 `text-processing-rs` 0.2.2, locked in
 `Cargo.lock` (crate source revision `34a9b62d64d95844d1916774054909fccee88f9a`); its license is retained in
-[licenses/text_processing_rs.txt](licenses/text_processing_rs.txt). This is a
+[licenses/text-processing.txt](licenses/text-processing.txt). This is a
 pure-Rust port of NeMo's English number grammars; it requires no additional model
 process. Formatting and restart editing are opt-in, and protected URLs, addresses,
 quotes and inline code bypass them.
