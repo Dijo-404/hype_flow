@@ -27,5 +27,8 @@ jobs:
           meson compile -C .migration/layer-shell-build
           sudo meson install -C .migration/layer-shell-build
           sudo ldconfig
+      # Ubuntu 24.04 blocks unprivileged user namespaces, which bubblewrap needs.
+      - name: Allow the worker sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: make check
       - run: make check-python

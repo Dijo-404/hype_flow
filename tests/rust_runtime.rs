@@ -386,7 +386,7 @@ read_pcm()
     let report: serde_json::Value = serde_json::from_str(&event(&events)).unwrap();
     let log = fs::read_to_string(temp.path().join("backend.log")).unwrap();
     assert!(log.contains("worker log is writable"), "{log}");
-    if !log.contains("bubblewrap") {
+    if !log.contains("Network sandbox: bubblewrap") {
         eprintln!("bubblewrap is unavailable; sandbox checks skipped");
         return;
     }
