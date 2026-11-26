@@ -478,7 +478,6 @@ impl AppState {
     }
 
     fn cancel(&mut self) {
-        let transcribing = self.session.phase == "transcribing";
         if !self.session.cancel() {
             // Nothing to abort: dismiss the capsule and keep a warm worker loaded.
             let last = self.last.clone();
@@ -495,9 +494,8 @@ impl AppState {
                 drop(recorder);
                 recovery::discard(spool.as_deref());
             }));
-        }
-        if transcribing {
-            // The stop thread now owns the eager decoder; only an engine stop aborts its queued pieces.
+        } else {
+            // A pending opener or the stop thread owns the eager decoder; only a new epoch aborts it.
             self.session.unloaded = true;
             self.workers.push(self.engine.stop_in_background());
         }
