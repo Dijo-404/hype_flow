@@ -398,14 +398,19 @@ fn wait_release(
     }
 }
 
-fn wait_for_modifiers(enabled: bool, cancelled: &impl Fn() -> bool) -> Result<()> {
+fn wait_for_modifiers(
+    enabled: bool,
+    stopped: Instant,
+    cancelled: &impl Fn() -> bool,
+) -> Result<()> {
     let keyboards = enabled.then(keyboard_devices).flatten();
     wait_release(
         || keyboards.as_deref().and_then(modifiers_down),
         cancelled,
         Duration::from_millis(50),
         Duration::from_millis(1500),
-        Duration::from_millis(180),
+        // The shortcut was pressed before decoding, so its keys have had that time to lift.
+        Duration::from_millis(180).saturating_sub(stopped.elapsed()),
     )
 }
 
@@ -434,10 +439,12 @@ pub fn deliver_until(
         trailing_space,
         press_enter,
         false,
+        Instant::now(),
         cancelled,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn deliver_guarded_until(
     text: &str,
     target: Option<&Value>,
@@ -445,6 +452,7 @@ pub fn deliver_guarded_until(
     trailing_space: bool,
     press_enter: bool,
     modifier_release_guard: bool,
+    stopped: Instant,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
     ensure!(!cancelled(), "Clipboard delivery cancelled");
@@ -460,7 +468,7 @@ pub fn deliver_guarded_until(
         return Ok("Copied".to_owned());
     }
     // The compositor must release the shortcut modifiers before synthesized keys.
-    wait_for_modifiers(modifier_release_guard, &cancelled)?;
+    wait_for_modifiers(modifier_release_guard, stopped, &cancelled)?;
     ensure!(!cancelled(), "Clipboard delivery cancelled");
     let id = target.and_then(window_id);
     // Check selections, then focus once before typing; Shift+Insert checks after setting primary.
@@ -568,5 +576,13 @@ mod modifier_tests {
         )
         .unwrap();
         assert!(started.elapsed() >= fallback);
+    }
+
+    #[test]
+    fn fallback_wait_counts_from_the_stop_shortcut() {
+        let started = Instant::now();
+        let stopped = started.checked_sub(Duration::from_secs(1)).unwrap();
+        wait_for_modifiers(false, stopped, &|| false).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(180));
     }
 }

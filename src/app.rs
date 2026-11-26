@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-type Transcript = (String, String, Option<String>, bool);
+type Transcript = (String, String, Option<String>, bool, std::time::Instant);
 const MIN_RECORDING_BYTES: usize = crate::backend::RATE * 2 * 3 / 10;
 const SHORT_RECORDING: &str = "Recording too short (minimum 300 ms)";
 
@@ -429,6 +429,7 @@ impl AppState {
         let runtime = self.runtime.clone();
         let recording_epoch = engine.recording_epoch();
         let spool = self.recording_spool.take();
+        let stopped = std::time::Instant::now();
         self.workers.push(thread::spawn(move || {
             let cancelled = || generation != live.load(Ordering::Acquire);
             let mut recording_too_short = false;
@@ -454,7 +455,7 @@ impl AppState {
                 committed.append(tail, tail_offset);
                 let silent = committed.text.is_empty() && !pcm.iter().any(|byte| *byte != 0);
                 let (raw, text, note) = finish_recognition(committed, &values, cancelled)?;
-                Ok((raw, text, note, silent))
+                Ok((raw, text, note, silent, stopped))
             })();
             if let Some(path) = spool.as_deref() {
                 if cancelled() || recording_too_short {
@@ -619,7 +620,7 @@ impl AppState {
                 engine.ensure_scoped(epoch, &cancelled)?;
                 let transcript = engine.transcribe_detailed_scoped(&pcm, epoch, &cancelled)?;
                 let (raw, text, note) = finish_recognition(transcript, &values, cancelled)?;
-                Ok((raw, text, note, false))
+                Ok((raw, text, note, false, std::time::Instant::now()))
             })();
             let _ = tx.send_blocking(Event::Transcribed(generation, result));
         }));
@@ -718,7 +719,7 @@ impl AppState {
                         self.workers.push(self.engine.stop_in_background());
                         self.publish("error", &format!("{error:#}"), true, 0.0, 0.0);
                     }
-                    Ok((raw, text, note, silent)) => {
+                    Ok((raw, text, note, silent, stopped)) => {
                         self.session.ready = true;
                         if raw.is_empty() {
                             self.publish(
@@ -774,6 +775,7 @@ impl AppState {
                                 values.trailing_space,
                                 values.press_enter,
                                 values.modifier_release_guard,
+                                stopped,
                                 || generation != live.load(Ordering::Acquire),
                             )
                             .map(|message| {
