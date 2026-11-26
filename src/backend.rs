@@ -10,7 +10,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,6 +22,7 @@ pub(crate) const PCM_LIMIT: usize = RATE * MAX_SECONDS * 2;
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 const DECODE_TIMEOUT: Duration = Duration::from_secs(600);
+static SANDBOX_WORKS: AtomicBool = AtomicBool::new(false);
 
 fn bubblewrap(reads: &[&Path]) -> Command {
     let mut command = Command::new("bwrap");
@@ -443,14 +444,17 @@ impl Engine {
             model.parent().unwrap_or(model),
             server.parent().unwrap_or(server),
         ];
-        let sandbox = run_command_until(
-            bubblewrap(&reads).arg("true"),
-            None,
-            Duration::from_secs(5),
-            true,
-            cancelled,
-        )
-        .is_ok_and(|output| output.status.success());
+        let sandbox = SANDBOX_WORKS.load(Ordering::Relaxed)
+            || run_command_until(
+                bubblewrap(&reads).arg("true"),
+                None,
+                Duration::from_secs(5),
+                true,
+                cancelled,
+            )
+            .is_ok_and(|output| output.status.success());
+        // Remember only success, so a transient failure is probed again next start.
+        SANDBOX_WORKS.fetch_or(sandbox, Ordering::Relaxed);
         ensure!(!cancelled(), "Speech backend startup cancelled");
         let mut command = if sandbox {
             let mut command = bubblewrap(&reads);

@@ -396,6 +396,58 @@ read_pcm()
 }
 
 #[test]
+fn sandbox_probe_success_is_reused_and_failure_is_retried() {
+    // A subprocess isolates the fake bwrap and the process-wide probe result.
+    if std::env::var_os("HYPE_FAKE_BWRAP").is_none() {
+        let bin = TempDir::new().unwrap();
+        executable(
+            &bin.path().join("bwrap"),
+            r#"#!/bin/sh
+calls="${0%/*}/calls"
+while [ "$1" != -- ]; do shift; done
+shift
+if [ "$1" = true ]; then
+    if [ -e "$calls" ]; then echo probe >> "$calls"; exit 0; fi
+    echo failed >> "$calls"
+    exit 1
+fi
+echo spawn >> "$calls"
+exec "$@"
+"#,
+        );
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "sandbox_probe_success_is_reused_and_failure_is_retried",
+                "--nocapture",
+            ])
+            .env("HYPE_FAKE_BWRAP", "1")
+            .env("PATH", bin.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(bin.path().join("calls")).unwrap(),
+            "failed\nprobe\nspawn\nspawn\n"
+        );
+        return;
+    }
+    let (_temp, engine) = fake_engine(&format!(
+        "{WORKER_SETUP}\nsend({{'ready': True}})\nread_pcm()\n"
+    ));
+    for _ in 0..3 {
+        engine.ensure().unwrap();
+        engine.stop();
+        engine.prepare();
+    }
+}
+
+#[test]
 fn worker_rejects_empty_oversize_non_object_and_missing_text_responses() {
     for (send, expected) in [
         ("os.write(1, struct.pack('<I', 0))", "response size"),
