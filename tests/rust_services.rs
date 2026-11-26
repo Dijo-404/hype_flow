@@ -157,7 +157,9 @@ fn exercise_services(root: &Path) {
         if [ "$1" = --primary ]; then selection_file="$HOME/primary"; shift; fi
         if [ ! -f "$selection_file" ]; then echo 'Nothing is copied' >&2; exit 1; fi
         case "$*" in
-        --list-types) printf 'image/png\ntext/plain;charset=utf-8\n' ;;
+        --list-types)
+            if [ -f "$HOME/unreadable" ]; then echo 'clipboard owner hung' >&2; exit 1; fi
+            printf 'image/png\ntext/plain;charset=utf-8\n' ;;
         '--no-newline --type text'|'--no-newline --type text/plain;charset=utf-8') cat "$selection_file" ;;
         *) exit 2 ;;
         esac"#,
@@ -218,6 +220,15 @@ fn exercise_services(root: &Path) {
     );
     output::finish_pending();
     assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
+    fs::write(root.join("unreadable"), []).unwrap();
+    assert_eq!(
+        output::deliver("unsaved", Some(&firefox), true, false, false).unwrap(),
+        "Pasted · clipboard not restored"
+    );
+    fs::remove_file(root.join("unreadable")).unwrap();
+    output::finish_pending();
+    assert_eq!(fs::read_to_string(&clipboard).unwrap(), "unsaved");
+    fs::write(&clipboard, "previous").unwrap();
 
     let code = json!({"id": 1, "app_id": "com.microsoft.VSCode"});
     let primary = root.join("primary");

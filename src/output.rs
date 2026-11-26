@@ -519,6 +519,8 @@ pub fn deliver_guarded_until(
             &cancelled,
         )?;
     }
+    // The original clipboard could not be read, so the transcript replaces it.
+    let unsaved = previous.is_none();
     restore_after_paste(previous, transcript, &mut selection, false);
     let submitted = if press_enter && !terminal {
         thread::sleep(Duration::from_millis(50));
@@ -531,12 +533,16 @@ pub fn deliver_guarded_until(
     } else {
         false
     };
-    Ok(if submitted {
+    let message = if submitted {
         "Pasted and sent"
     } else {
         "Pasted"
-    }
-    .to_owned())
+    };
+    Ok(if unsaved {
+        format!("{message} · clipboard not restored")
+    } else {
+        message.to_owned()
+    })
 }
 
 #[cfg(test)]
