@@ -491,12 +491,13 @@ pub fn deliver_guarded_until(
     if shift_insert {
         let mut primary = PRIMARY.lock().unwrap_or_else(|error| error.into_inner());
         let previous_primary = replace_selection(&transcript, true, true, &mut primary)?;
+        // Skip the primary restore so the transcript stays recoverable there.
+        if !still_selected(&transcript, false) {
+            return Ok("Copied · clipboard changed".to_owned());
+        }
         let pasted: Result<bool> = (|| {
             ensure!(!cancelled(), "Clipboard delivery cancelled");
-            if !still_selected(&transcript, true)
-                || !still_selected(&transcript, false)
-                || !focused()
-            {
+            if !still_selected(&transcript, true) || !focused() {
                 return Ok(false);
             }
             type_keys(&["-M", "shift", "-k", "Insert", "-m", "shift"], &cancelled)?;

@@ -233,7 +233,13 @@ fn exercise_services(root: &Path) {
     let code = json!({"id": 1, "app_id": "com.microsoft.VSCode"});
     let primary = root.join("primary");
     fs::write(&primary, "previous primary").unwrap();
+    fs::remove_file(root.join("spawned")).unwrap();
     output::deliver("Codex webview text", Some(&code), true, false, false).unwrap();
+    // Save both selections, check them after setting primary, then check focus once.
+    assert_eq!(
+        fs::read_to_string(root.join("spawned")).unwrap(),
+        format!("{}niri\n", "wl-paste\n".repeat(6))
+    );
     assert_eq!(fs::read_to_string(&primary).unwrap(), "Codex webview text");
     assert!(
         fs::read_to_string(&typing)
@@ -373,6 +379,18 @@ fn exercise_services(root: &Path) {
         fs::read_to_string(root.join("primary")).unwrap(),
         "recover this"
     );
+    fs::write(root.join("new-selection"), "newer clipboard item").unwrap();
+    assert_eq!(
+        output::deliver("keep Code text", Some(&code), true, false, false).unwrap(),
+        "Copied · clipboard changed"
+    );
+    output::finish_pending();
+    assert!(!typing.exists());
+    assert_eq!(
+        fs::read_to_string(&clipboard).unwrap(),
+        "newer clipboard item"
+    );
+    assert_eq!(fs::read_to_string(&primary).unwrap(), "keep Code text");
     let held_stderr = root.join("held-stderr");
     fs::write(&held_stderr, []).unwrap();
     let copied = output::copy_text("daemon selection", false);
