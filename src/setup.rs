@@ -681,6 +681,31 @@ mod tests {
     }
 
     #[test]
+    fn runtime_archive_rejects_parent_directory_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("runtime.tar.bz2");
+        let compressed = bzip2::write::BzEncoder::new(
+            File::create(&archive).unwrap(),
+            bzip2::Compression::default(),
+        );
+        let mut builder = tar::Builder::new(compressed);
+        let mut header = tar::Header::new_gnu();
+        // Header::set_path refuses "..", so write the raw name a hostile archive would carry.
+        let name = format!("{RUNTIME_NAME}/lib/../../escaped");
+        header.as_old_mut().name[..name.len()].copy_from_slice(name.as_bytes());
+        header.set_size(1);
+        header.set_mode(0o600);
+        header.set_cksum();
+        builder.append(&header, &b"x"[..]).unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+        let runtime = root.path().join("stage/runtime");
+        let error = extract_runtime(&archive, &runtime).unwrap_err();
+        assert!(error.to_string().contains("Unsafe"), "{error:#}");
+        assert!(!root.path().join("stage/escaped").exists());
+        assert!(!root.path().join("escaped").exists());
+    }
+
+    #[test]
     fn stages_shipped_worker_without_a_compiler_and_rejects_bad_sources() {
         let root = tempfile::tempdir().unwrap();
         let runtime = root.path().join("runtime");
