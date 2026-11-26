@@ -461,12 +461,11 @@ impl AppState {
     }
 
     fn cancel(&mut self) {
-        if self.session.phase == "loading" {
+        let transcribing = self.session.phase == "transcribing";
+        if !self.session.cancel() {
+            // Nothing to abort: dismiss the capsule and keep a warm worker loaded.
             let last = self.last.clone();
             self.publish(last.0, &last.1, false, last.3, last.4);
-            return;
-        }
-        if !self.session.cancel() {
             return;
         }
         self.live.store(self.session.generation, Ordering::Release);
@@ -480,8 +479,11 @@ impl AppState {
                 recovery::discard(spool.as_deref());
             }));
         }
-        self.session.unloaded = true;
-        self.workers.push(self.engine.stop_in_background());
+        if transcribing {
+            // The stop thread now owns the eager decoder; only an engine stop aborts its queued pieces.
+            self.session.unloaded = true;
+            self.workers.push(self.engine.stop_in_background());
+        }
         self.session.busy = false;
         self.publish("idle", "Cancelled", false, 0.0, 0.0);
     }

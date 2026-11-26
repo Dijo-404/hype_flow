@@ -65,7 +65,7 @@ impl Session {
     }
 
     pub fn cancel(&mut self) -> bool {
-        if matches!(self.phase, "loading" | "delivering") {
+        if !matches!(self.phase, "starting" | "recording" | "transcribing") {
             return false;
         }
         self.generation += 1;
@@ -111,6 +111,19 @@ mod tests {
         assert!(state.current(generation));
         state.closing = true;
         assert!(!state.current(generation));
+    }
+    #[test]
+    fn cancel_without_running_dictation_changes_nothing() {
+        for phase in ["idle", "done", "error", "loading", "delivering"] {
+            let mut state = Session {
+                ready: true,
+                phase,
+                generation: 7,
+                ..Session::default()
+            };
+            assert!(!state.cancel(), "{phase}");
+            assert_eq!((state.phase, state.generation), (phase, 7));
+        }
     }
     #[test]
     fn press_after_failed_dictation_records_again() {
