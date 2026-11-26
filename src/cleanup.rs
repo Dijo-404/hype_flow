@@ -226,11 +226,16 @@ struct FuzzyKey<'a> {
 fn fuzzy_keys(vocabulary: &[(String, String)]) -> Vec<FuzzyKey<'_>> {
     let mut keys = Vec::new();
     for (_, word) in vocabulary {
+        // A key drops edge symbols, so "C#" would claim every "c"; exact matching covers these.
+        if edges(word) != ("", "") {
+            continue;
+        }
         let first = key(word);
         let expanded = key(&word.replace('&', " and "));
         let alternate = (expanded != first).then_some(expanded);
         for value in [Some(first), alternate].into_iter().flatten() {
-            if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            // Very short keys ("rd" from R&D) are ordinary words.
+            if value.len() >= 3 && value.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
                 keys.push(FuzzyKey {
                     sound: value
                         .bytes()
