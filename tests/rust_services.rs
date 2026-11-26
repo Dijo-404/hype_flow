@@ -479,12 +479,15 @@ fn exercise_services(root: &Path) {
             .count(),
         1
     );
-    assert!(fs::read_dir(&niri).unwrap().flatten().any(|entry| {
-        entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("config.kdl.hype-flow-backup-")
-    }));
+    let backups = |prefix: &str| {
+        fs::read_dir(&niri)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+            .count()
+    };
+    // The rejected save and the first install changed config.kdl; the second install did not.
+    assert_eq!(backups("config.kdl.hype-flow-backup-"), 2);
 
     let mut values = Config {
         dictation_shortcut: "Mod+Ctrl+Space".into(),
@@ -528,8 +531,10 @@ fn exercise_services(root: &Path) {
             .file_name()
             .to_string_lossy()
             .starts_with("hype-flow.kdl.hype-flow-backup-")
-            && fs::read_to_string(entry.path()).is_ok_and(|text| text == original_bindings)
+            && fs::read_to_string(entry.path()).is_ok_and(|text| text == held)
     }));
+    assert_eq!(backups("hype-flow.kdl.hype-flow-backup-"), 3);
+    assert_eq!(backups("config.kdl.hype-flow-backup-"), 2);
     fs::write(
         niri.join("keys.kdl"),
         "binds { Alt+F9 { spawn \"test\"; }; }\n",
@@ -545,6 +550,19 @@ fn exercise_services(root: &Path) {
     );
     assert_eq!(fs::read(&preferences).unwrap(), saved_preferences);
     assert_eq!(fs::read_to_string(&bindings).unwrap(), installed);
+    let dotfile = root.join("dotfiles-niri.kdl");
+    fs::rename(&config, &dotfile).unwrap();
+    std::os::unix::fs::symlink(&dotfile, &config).unwrap();
+    shortcuts::install().unwrap();
+    assert!(fs::symlink_metadata(&config).unwrap().is_symlink());
+    fs::write(&dotfile, &original_config).unwrap();
+    let error = shortcuts::install().unwrap_err().to_string();
+    assert!(
+        error.contains(&format!("include \"{}\"", bindings.display())),
+        "{error}"
+    );
+    assert!(fs::symlink_metadata(&config).unwrap().is_symlink());
+    assert_eq!(fs::read_to_string(&dotfile).unwrap(), original_config);
 
     executable(
         &bin.join("playerctl"),

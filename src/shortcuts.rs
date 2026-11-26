@@ -224,6 +224,13 @@ fn install_with(changes: Option<&Config>) -> Result<String> {
     );
     let original = fs::read_to_string(&config)?;
     let include = format!("include {}", serde_json::to_string(path_string(&target)?)?);
+    let included = original.contains(&include);
+    // Replacing a symlinked config would detach it from the user's dotfiles.
+    ensure!(
+        included || !fs::symlink_metadata(&config)?.file_type().is_symlink(),
+        "{} is a symlink, so Hype Flow will not replace it. Add this line to the file it points to, then try again: {include}",
+        config.display()
+    );
     let managed = if target.exists() {
         target.canonicalize()?
     } else {
@@ -241,7 +248,6 @@ fn install_with(changes: Option<&Config>) -> Result<String> {
         "include {}",
         serde_json::to_string(path_string(&generated)?)?
     );
-    let included = original.contains(&include);
     let checked = if included {
         original.replace(&include, &staged_include)
     } else {
@@ -289,9 +295,11 @@ fn install_with(changes: Option<&Config>) -> Result<String> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let filename = config.file_name().unwrap_or_default().to_string_lossy();
     let backup = parent.join(format!("{filename}.hype-flow-backup-{stamp}"));
-    let backup_copy = NamedTempFile::new_in(parent)?;
-    fs::copy(&config, backup_copy.path())?;
-    backup_copy.persist_noclobber(&backup)?;
+    if !included {
+        let backup_copy = NamedTempFile::new_in(parent)?;
+        fs::copy(&config, backup_copy.path())?;
+        backup_copy.persist_noclobber(&backup)?;
+    }
     if current_bindings.is_some() {
         let backup_copy = NamedTempFile::new_in(parent)?;
         fs::copy(&target, backup_copy.path())?;
@@ -353,13 +361,37 @@ fn install_with(changes: Option<&Config>) -> Result<String> {
         }
         return Err(error).context("Could not save settings; previous shortcuts restored");
     }
+    // Every save replaces hype-flow.kdl, so prune its backups to the newest three, best effort.
+    let mut stale: Vec<_> = fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let stamp = name
+                .to_str()?
+                .strip_prefix("hype-flow.kdl.hype-flow-backup-")?
+                .parse::<u128>()
+                .ok()?;
+            Some((stamp, entry.path()))
+        })
+        .collect();
+    stale.sort_unstable();
+    for (_, path) in stale.iter().rev().skip(3) {
+        let _ = fs::remove_file(path);
+    }
     Ok(format!(
-        "Shortcuts ready. {} {}. A backup of your niri config was saved.",
+        "Shortcuts ready. {} {}.{}",
         keys[0],
         if values.dictation_mode == "hold" {
             "holds dictation until released"
         } else {
             "starts dictation"
+        },
+        match (included, current_bindings.is_some()) {
+            (false, _) => " A backup of your niri config was saved.",
+            (true, true) => " A backup of your previous shortcuts was saved.",
+            (true, false) => "",
         }
     ))
 }
