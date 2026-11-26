@@ -62,8 +62,14 @@ fn bubblewrap(reads: &[&Path]) -> Command {
 }
 
 pub fn wav_bytes(pcm: &[u8]) -> Vec<u8> {
-    let size = pcm.len() as u32;
-    let mut wav = Vec::with_capacity(44 + pcm.len());
+    let mut wav = wav_header(pcm.len());
+    wav.extend_from_slice(pcm);
+    wav
+}
+
+pub(crate) fn wav_header(pcm_len: usize) -> Vec<u8> {
+    let size = pcm_len as u32;
+    let mut wav = Vec::with_capacity(44);
     wav.extend_from_slice(b"RIFF");
     wav.extend_from_slice(&(36 + size).to_le_bytes());
     wav.extend_from_slice(b"WAVEfmt ");
@@ -73,7 +79,6 @@ pub fn wav_bytes(pcm: &[u8]) -> Vec<u8> {
     wav.extend_from_slice(&[2, 0, 16, 0]);
     wav.extend_from_slice(b"data");
     wav.extend_from_slice(&size.to_le_bytes());
-    wav.extend_from_slice(pcm);
     wav
 }
 
