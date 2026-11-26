@@ -530,8 +530,11 @@ pub fn process_with_confidence(
         None
     };
     let mut removed = false;
-    let mut plain = |mut text: String| -> Result<String> {
-        text = NOISE_TAGS.replace_all(&text, " ").into_owned();
+    let mut plain = |segment: &str| -> Result<String> {
+        // Stages that rebuild text from words drop the spaces joining it to a protected span.
+        let body = segment.trim_matches(whitespace);
+        let start = segment.len() - segment.trim_start_matches(whitespace).len();
+        let mut text = NOISE_TAGS.replace_all(body, " ").into_owned();
         if values.remove_restarts {
             text = crate::restarts::collapse_restarts(&text);
         }
@@ -583,6 +586,11 @@ pub fn process_with_confidence(
         if values.remove_repetitions {
             text = remove_repetitions(&text)?;
         }
+        let text = format!(
+            "{}{text}{}",
+            &segment[..start],
+            &segment[start + body.len()..]
+        );
         let text = HORIZONTAL_SPACES.replace_all(&text, " ");
         Ok(PUNCTUATION_SPACES.replace_all(&text, "$1").into_owned())
     };
@@ -591,11 +599,11 @@ pub fn process_with_confidence(
     let mut end = 0;
     for protected in PROTECTED.find_iter(text) {
         let protected = protected?;
-        result.push_str(&plain(text[end..protected.start()].to_owned())?);
+        result.push_str(&plain(&text[end..protected.start()])?);
         result.push_str(protected.as_str());
         end = protected.end();
     }
-    result.push_str(&plain(text[end..].to_owned())?);
+    result.push_str(&plain(&text[end..])?);
     let result = result.trim_matches(whitespace);
     let result = match result.strip_prefix([',', ';', ':']) {
         Some(rest) => rest.trim_start_matches(whitespace),

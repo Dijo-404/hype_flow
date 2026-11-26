@@ -261,5 +261,20 @@
     "input": "Call five five five one two one two.",
     "settings": { "format_numbers": true, "remove_repetitions": true },
     "output": "Call 5551212."
+  },
+  {
+    "input": "email pete@example.com it costs twenty five dollars",
+    "settings": { "format_numbers": true },
+    "output": "email pete@example.com it costs $25"
+  },
+  {
+    "input": "run `ls` then pay twenty five dollars",
+    "settings": { "format_numbers": true },
+    "output": "run `ls` then pay $25"
+  },
+  {
+    "input": "run `ls` We need red. I mean, blue.",
+    "settings": { "remove_restarts": true },
+    "output": "run `ls` Blue."
   }
 ]
