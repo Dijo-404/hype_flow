@@ -1,5 +1,5 @@
 use crate::{audio, config::Config, setup};
-use gtk::{gdk, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::{
     cell::{Cell, RefCell},
@@ -162,7 +162,7 @@ pub enum Control {
     Entry(gtk::Entry),
     Text(gtk::TextBuffer),
     Number(gtk::SpinButton),
-    Choice(gtk::DropDown, Vec<String>),
+    Choice(gtk::DropDown, RefCell<Vec<String>>),
     Shortcut(Rc<ShortcutCapture>),
 }
 
@@ -181,6 +181,7 @@ impl Control {
             Self::Number(widget) => json!(widget.value()),
             Self::Choice(widget, values) => json!(
                 values
+                    .borrow()
                     .get(widget.selected() as usize)
                     .cloned()
                     .unwrap_or_default()
@@ -245,6 +246,17 @@ fn label(text: &str, class: &str) -> gtk::Label {
         widget.add_css_class(class);
     }
     widget
+}
+
+fn input_choices(sources: Vec<(String, String)>, keep: &[&str]) -> Vec<(String, String)> {
+    let mut choices = vec![("auto".to_string(), "System default".to_string())];
+    choices.extend(sources);
+    for id in keep {
+        if !choices.iter().any(|(key, _)| key == id) {
+            choices.push((id.to_string(), format!("{id} (unavailable)")));
+        }
+    }
+    choices
 }
 
 fn section(page: &gtk::Box, title: &str) -> gtk::Box {
@@ -576,14 +588,7 @@ impl Home {
             row(group, title, detail, &switch);
             controls.push((key.to_string(), Control::Switch(switch)));
         }
-        let mut sources = vec![("auto".to_string(), "System default".to_string())];
-        sources.extend(audio::sources());
-        if !sources.iter().any(|(key, _)| key == &values.input_target) {
-            sources.push((
-                values.input_target.clone(),
-                format!("{} (unavailable)", values.input_target),
-            ));
-        }
+        let sources = input_choices(Vec::new(), &[&values.input_target]);
         for (key, title, detail, choices, group) in [
             (
                 "model_variant",
@@ -662,7 +667,10 @@ impl Home {
             rows.push((item, dropdown.clone().upcast()));
             controls.push((
                 key.to_string(),
-                Control::Choice(dropdown, choices.into_iter().map(|(id, _)| id).collect()),
+                Control::Choice(
+                    dropdown,
+                    RefCell::new(choices.into_iter().map(|(id, _)| id).collect()),
+                ),
             ));
         }
         let model_actions = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -945,6 +953,18 @@ impl Home {
             }
         });
         let weak = Rc::downgrade(&home);
+        home.window.connect_show(move |_| {
+            let weak = weak.clone();
+            // pw-dump can take seconds, so list microphones off the GTK thread on every open.
+            glib::spawn_future_local(async move {
+                if let Ok(sources) = gio::spawn_blocking(audio::sources).await
+                    && let Some(home) = weak.upgrade()
+                {
+                    home.set_sources(sources);
+                }
+            });
+        });
+        let weak = Rc::downgrade(&home);
         home.window.connect_realize(move |window| {
             let weak = weak.clone();
             // Fires on the first size and on interactive, tiled and maximized resizes.
@@ -968,6 +988,35 @@ impl Home {
                 capture.cancel();
             }
         }
+    }
+
+    fn set_sources(&self, sources: Vec<(String, String)>) {
+        let Some((dropdown, ids)) = self
+            .controls
+            .iter()
+            .find_map(|(key, control)| match control {
+                Control::Choice(dropdown, ids) if key == "input_target" => Some((dropdown, ids)),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        let selected = ids
+            .borrow()
+            .get(dropdown.selected() as usize)
+            .cloned()
+            .unwrap_or_else(|| "auto".into());
+        let choices = input_choices(sources, &[&self.values.borrow().input_target, &selected]);
+        let labels: Vec<&str> = choices.iter().map(|(_, label)| label.as_str()).collect();
+        let position = choices.iter().position(|(id, _)| *id == selected);
+        // A refreshed device list is not an edit, so keep the save button as it was.
+        let (sensitive, label) = (self.save_button.is_sensitive(), self.save_button.label());
+        *ids.borrow_mut() = choices.iter().map(|(id, _)| id.clone()).collect();
+        dropdown.set_model(Some(&gtk::StringList::new(&labels)));
+        dropdown.set_selected(position.unwrap_or(0) as u32);
+        self.save_button.set_sensitive(sensitive);
+        self.save_button
+            .set_label(label.as_deref().unwrap_or_default());
     }
 
     pub fn changes(&self) -> anyhow::Result<Config> {
@@ -1450,5 +1499,22 @@ mod tests {
         pill.target = 48.0;
         assert!(pill.animating(true));
         assert!(!pill.animating(false));
+    }
+
+    #[test]
+    fn refreshed_input_choices_keep_saved_and_selected_devices() {
+        let choices = input_choices(
+            vec![("usb".into(), "USB microphone".into())],
+            &["unplugged", "usb", "auto", "unplugged"],
+        );
+        assert_eq!(
+            choices,
+            [
+                ("auto", "System default"),
+                ("usb", "USB microphone"),
+                ("unplugged", "unplugged (unavailable)"),
+            ]
+            .map(|(id, label)| (id.to_string(), label.to_string()))
+        );
     }
 }
