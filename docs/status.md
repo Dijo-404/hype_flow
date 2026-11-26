@@ -1,8 +1,8 @@
 # Accuracy, latency and memory implementation status
 
 Updated: 2026-11-24. This records the implementation of
-[accuracy-latency-memory-plan.md](accuracy-latency-memory-plan.md) and
-[reference-comparison.md](reference-comparison.md). The original recommendations
+[plan.md](plan.md) and
+[comparison.md](comparison.md). The original recommendations
 remain intact; this document distinguishes implemented code, evidence, open gates
 and work that still needs a representative corpus or a separate product change.
 
@@ -36,7 +36,7 @@ MIT-licensed source and invoked through an evaluation-only Python standard-libra
 helper. This preserves its complete number/contraction/spelling grammar instead
 of shipping an approximate Rust port. Dictation and inference remain native
 Rust. Scoring/Python startup is outside reported processing latency. Provenance
-and license are in [third_party.md](third_party.md).
+and license are in [third-party.md](third-party.md).
 
 The existing framed PCM worker protocol is reused for eager decoding rather
 than introducing chunk/end messages. Each completed bounded piece is already
@@ -117,8 +117,8 @@ load on the test host. The baseline includes 69 clips below the 300 ms app
 capture minimum. Published Sayso numbers use different sampling and short-clip
 padding. The user selected public speech for this pass.
 
-Full scores and asset fingerprints are in [public-unified.json](eval-results/public-unified.json).
-Corpus counts, revision, and sampling are in [public-corpus.json](eval-results/public-corpus.json).
+Full scores and asset fingerprints are in [public/unified.json](eval-results/public/unified.json).
+Corpus counts, revision, and sampling are in [public/corpus.json](eval-results/public/corpus.json).
 
 The 35-configuration sweep used the same 21 clips for each comparison. Six
 threads reached 643 ms p95 versus 790 ms at four threads, with identical WER.
@@ -130,7 +130,7 @@ No boost score improved keyword F1 beyond the greedy baseline of 97.44%.
 At 3.0, boosting inserted seven keywords into ten control clips. The public
 sample supports leaving boosting opt-in. Giving the decoder the reference
 words at boost 1.5 increased raw errors from 15 to 29 across 120 reference
-words. The [hotword sanity gate](eval-results/public-hotword-sanity.json) failed.
+words. The [hotword sanity gate](eval-results/public/hotword-sanity.json) failed.
 
 The full Unified run wrote digits in 43 clips and adjacent spoken number words
 in 54 clips. These counts are a proxy for formatting opportunities. In the
@@ -148,9 +148,9 @@ worker RSS was 470,892 KiB, 61% below Unified's 1,202,944 KiB. Low Memory had
 the largest WER increase on AMI, from 9.99% to 15.43%. The full Low Memory run
 overlapped other evaluations, so use the small serial sweep for an exploratory
 latency comparison. Unified was the default at the time of that comparison.
-[Full Low Memory results](eval-results/public-low-memory.json),
-[matched sweep](eval-results/public-sweep.json),
-[Low Memory sample](eval-results/public-low-memory-sample.json).
+[Full Low Memory results](eval-results/public/low-memory/full.json),
+[matched sweep](eval-results/public/sweep.json),
+[Low Memory sample](eval-results/public/low-memory/sample.json).
 
 From seven public clips, 35 silence/noise variants scored 15.19% WER with
 the baseline, 15.06% with capped gain, 15.68% with VAD off, 18.64% with
@@ -158,15 +158,15 @@ denoising, and 18.15% with VAD off and denoising on. Denoising also increased
 p95 processing time from 1.35 to 3.39 seconds with VAD enabled. These results
 support retaining the current denoiser default. On the same seven source clips,
 28 speed and codec variants scored 10.03% WER overall.
-[Noise and silence results](eval-results/public-augmented-baseline.json),
-[media results](eval-results/public-media.json).
+[Noise and silence results](eval-results/public/augmented/baseline.json),
+[media results](eval-results/public/media.json).
 
 The 64-, 124-, and 186-second fixtures used 40 distinct LibriSpeech clean clips.
 All 40 checkpoint phrases survived in order. Word-LCS exceeded 99.6% across
 all three recordings. Worker high-water RSS stayed at 1,091,548 KiB after
 the shortest fixture. This checks boundaries on individually decoded clean
-clips. [Long-form scores](eval-results/public-long-boundary.json),
-[checkpoint and memory results](eval-results/public-long-checkpoints.json).
+clips. [Long-form scores](eval-results/public/long/boundary.json),
+[checkpoint and memory results](eval-results/public/long/checkpoints.json).
 
 Paced replay in isolated niri pasted the 11-second clip at 776 ms p50 and
 783 ms p95 across three runs after warm-up. The 34.5-second replay completed
@@ -176,8 +176,8 @@ tracing found reads returning the correct bytes after more than two seconds.
 A three-second read deadline, matching writes, resolved the copy-only fallback
 in the rerun. The focus and clipboard equality checks still gated paste.
 The longer test includes tracing overhead and nested compositor stalls.
-[Short replay](eval-results/desktop-paced-short.json),
-[long replay](eval-results/desktop-paced-long.json).
+[Short replay](eval-results/desktop/paced-short.json),
+[long replay](eval-results/desktop/paced-long.json).
 
 Final local checks passed `make check`, `make check-python` (88 discovered,
 three skipped), `make release`, the isolated desktop driver, and a staged
@@ -192,7 +192,7 @@ it reached 276 ms p95 decode and cleanup, down from 498 ms for 110M TDT.
 Peak worker RSS was 477 MB. Whisper WER was 8.08% versus 7.48% for TDT. On the
 70-clip standalone screening run, Canary 180M Flash scored 8.13% WER at
 1.69 seconds p95, versus 6.60% at 220 ms for CTC.
-[Full CTC results](eval-results/public-parakeet-ctc.json).
+[Full CTC results](eval-results/public/ctc/full.json).
 
 First-run setup verified and activated the CTC archive in an isolated desktop
 session. The app keeps the saved model on existing installations. TDT and
@@ -203,8 +203,8 @@ comparisons, with word-LCS of 97.7% and 99.2%. Five other comparisons differed
 only in case or punctuation. Pure silence passed. On the three stitched
 long-form fixtures, CTC matched 36 of 40 checkpoint phrases in order. The
 public benchmark and staged activation passed. The remaining checks are
-listed in the [accuracy plan](accuracy-latency-memory-plan.md#remaining-work)
-and [reference comparison](reference-comparison.md#remaining-work).
+listed in the [accuracy plan](plan.md#remaining-work)
+and [reference comparison](comparison.md#remaining-work).
 
 ### CTC pause preservation
 
@@ -221,7 +221,7 @@ Across the same 1,400 public clips, Whisper WER changed from 8.08% to 8.03%.
 Peak worker RSS was 477 MB. The separate full runs measured 276 ms and 260 ms
 at p95. The paired 70-clip test measured 238 ms and 250 ms at p95 and
 one additional word error. These measurements show a small runtime trade-off
-across the samples. [Updated public scores](eval-results/public-parakeet-ctc-pauses.json).
+across the samples. [Updated public scores](eval-results/public/ctc/pauses.json).
 
 Hype Flow now normalizes the leading all-zero PCM to one 32 ms Silero VAD
 window before splitting CTC audio. The eager capture path accounts for the
@@ -243,7 +243,7 @@ run took 544 ms from end of capture to paste after warm-up.
 
 The same 1,400 public clips produced 8.06% Whisper WER after preroll
 normalization, up from 8.03%. Decode and cleanup took 256 ms at p95, and
-peak worker RSS was 474 MB. [Public preroll scores](eval-results/public-parakeet-ctc-preroll.json).
+peak worker RSS was 474 MB. [Public preroll scores](eval-results/public/ctc/preroll.json).
 
 The live Wayland app reached Ready after switching to CTC. The installed
 recognizer passed the three original leading-silence checks with the saved

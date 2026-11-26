@@ -898,11 +898,11 @@ need.
 
 ## Implementation follow-through
 
-See [implementation-status.md](implementation-status.md) for the recommendation
+See [status.md](status.md) for the recommendation
 mapping, public benchmark results, and remaining validation and research items.
 The [evaluation summaries](eval-results/README.md) include the matched
 1,400-clip model comparison and the results of the vocabulary and VAD sweeps.
-The [CTC pause checks](implementation-status.md#ctc-pause-preservation) track
+The [CTC pause checks](status.md#ctc-pause-preservation) track
 leading-silence, interior-pause, and long-form behavior.
 
 ### Remaining work

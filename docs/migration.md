@@ -114,7 +114,7 @@ libraries and the model were not rewritten or replaced.
 - Generated bindings require all 21 used native functions. Independent C/Rust
   checks matched 33 struct sizes/alignments and 155 field offsets. The pinned
   header and exact regeneration procedure are documented in
-  [third_party.md](third_party.md); regeneration reproduced the file byte for byte.
+  [third-party.md](third-party.md); regeneration reproduced the file byte for byte.
 - C and Rust transcripts were identical for all three clips in greedy,
   boosting, VAD, denoising and combined modes over five measured repetitions
   per mode. This establishes wrapper parity, not an accuracy guarantee for

@@ -292,8 +292,8 @@ Open **Speech model** and select **Install selected model**. Setup reuses a veri
 | [Configuration](docs/config.toml)                      | Settings and their defaults                        |
 | [niri integration](docs/niri.kdl)                      | Manual bindings and login startup                  |
 | [Evaluation](docs/eval-results/README.md)              | Reproduction steps, metrics, and benchmark results |
-| [Implementation status](docs/implementation-status.md) | Verification evidence and open work                |
-| [Provenance](docs/third_party.md)                      | Models, runtimes, and third-party notices          |
+| [Implementation status](docs/status.md)                | Verification evidence and open work                |
+| [Provenance](docs/third-party.md)                      | Models, runtimes, and third-party notices          |
 
 ## Contributing
 
@@ -301,7 +301,7 @@ Issues and pull requests are welcome. Include the app revision, niri version, an
 
 ## License
 
-Project-wide licensing is unspecified. The model, runtime, and reused components have their own terms and notices. [Third-party notices](docs/third_party.md)
+Project-wide licensing is unspecified. The model, runtime, and reused components have their own terms and notices. [Third-party notices](docs/third-party.md)
 
 ## Acknowledgements
 
