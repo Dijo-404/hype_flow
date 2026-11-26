@@ -37,7 +37,7 @@ const LOW_MEMORY_NAME: &str = "parakeet-110m-en-int8";
 const LOW_MEMORY_SHA256: &str = "f628312e9fdf8686374cb01a69425c41732529d540860311f16f37cbc32cfe9b";
 const CTC_NAME: &str = "parakeet-110m-ctc-en-int8";
 const CTC_FILES: &[&str] = &["model.int8.onnx", "tokens.txt"];
-pub const DEFAULT_MODEL_VARIANT: &str = "parakeet-ctc";
+pub const DEFAULT_MODEL_VARIANT: &str = "unified";
 
 #[derive(Clone, Copy, Debug)]
 pub struct ModelSpec {

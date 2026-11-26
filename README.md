@@ -28,12 +28,12 @@
 
 ## Overview
 
-Hype Flow is a native Linux dictation app for niri. Press a shortcut, speak, and press it again to paste into the window where you started. Recognition runs locally on the CPU using Parakeet 110M CTC English INT8 by default.
+Hype Flow is a native Linux dictation app for niri. Press a shortcut, speak, and press it again to paste into the window where you started. Recognition runs locally on the CPU using Parakeet Unified English 0.6B INT8 by default.
 
 ### Features
 
 - **Dictate without leaving your app.** The recording capsule keeps focus on your text field. Click it to finish or right-click to cancel.
-- **Start at login with a small footprint.** The default model takes 131.7 MB on disk. The worker loads during your first recording and unloads after 10 idle minutes by default.
+- **Start at login with a light idle footprint.** The default model takes 663 MB on disk and about 1.2 GB of memory while loaded. The worker loads during your first recording and unloads after 10 idle minutes by default. The 110M models take about 135 MB on disk and 470 MB of memory.
 - **Keep your preferred spellings.** Add vocabulary and exact text corrections, filter filler words, and copy the original recognition result whenever you need it.
 - **Work with longer dictation.** Capture up to five minutes. Hype Flow prefers pauses when splitting audio and decodes completed pieces while you speak.
 - **Choose what stays on disk.** Audio stays in memory by default. Enable history or recovery to keep recent recordings for retry.
@@ -146,14 +146,14 @@ open ai => OpenAI
 
 Choose **Copy original** under **General** to recover text before cleanup. Default filler filtering removes `um`, `uh`, `erm`, `umm`, and `uhh`. Near-miss corrections, spoken commands, number formatting, and repeated-word removal are available as opt-in controls.
 
-**Switch speech models.** In **Speech model**, choose **110M TDT** or **Unified**, save, and select **Install selected model**. Your active model remains in use until installation succeeds. Unified also supports optional native vocabulary boosting.
+**Switch speech models.** In **Speech model**, choose **110M TDT** or **110M CTC** for lower memory and latency, save, and select **Install selected model**. Your active model remains in use until installation succeeds. Unified also supports optional native vocabulary boosting.
 
 ## Configuration
 
 Settings live at `~/.config/hype-flow/config.toml` by default. Every key is optional. Use the settings window for common options, including microphone selection, paste behavior, start and stop sounds, and **Keep microphone ready**. That last option keeps the microphone open for 30 seconds after a dictation and can include audio from up to half a second before the next shortcut.
 
 ```toml
-model_variant = "parakeet-ctc"
+model_variant = "unified"
 dictation_shortcut = "Alt+Space"
 unload_minutes = 10
 ```

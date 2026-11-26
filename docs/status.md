@@ -187,7 +187,18 @@ microphone capture under inference load.
 
 ## Default model update
 
-Parakeet 110M CTC INT8 is the first-run default. On 1,400 matched public clips,
+Parakeet Unified English 0.6B INT8 is the first-run default again. On the same
+1,400 public clips, it scored 6.44% Whisper WER versus 8.03% for 110M CTC, with
+787 versus 1,219 substitutions. On AMI meeting audio, it scored 9.99% versus
+15.77%. It costs a 663 MB download, about 1.2 GB peak worker RSS, and 973 ms
+p95 versus 260 ms. Existing installations keep their saved model. CTC and TDT
+remain selectable for lower memory and latency.
+[Unified results](eval-results/public/unified.json),
+[CTC results](eval-results/public/ctc/pauses.json).
+
+The earlier CTC default is recorded below.
+
+Parakeet 110M CTC INT8 was the first-run default. On 1,400 matched public clips,
 it reached 276 ms p95 decode and cleanup, down from 498 ms for 110M TDT.
 Peak worker RSS was 477 MB. Whisper WER was 8.08% versus 7.48% for TDT. On the
 70-clip standalone screening run, Canary 180M Flash scored 8.13% WER at
@@ -260,7 +271,7 @@ denoising setting enabled.
 | A7             | 13        | Added opt-in number formatting using guarded `text-processing-rs` grammars. Preserve prose number words and protected spans.                                                                                                                                            |
 | A8             | 9         | Exact invariance remains available and reports punctuation differences. `--word-invariance` separately checks normalized word sequences while recording exact-format differences.                                                                                       |
 | L2             | 15        | Tested the fallback and held-modifier behavior. Live modifier polling needs readable keyboard devices.                                                                                                                                                                  |
-| M2, M3         | 20        | Added shorter idle unload options and checksum-pinned Parakeet 110M exports. Both use 80 features and greedy decoding. CTC is the first-run default.                                                                                                                    |
+| M2, M3         | 20        | Added shorter idle unload options and checksum-pinned Parakeet 110M exports. Both use 80 features and greedy decoding. CTC was the first-run default until Unified returned.                                                                                                                    |
 | A9             | 10        | Parse word confidence, remap timestamps to source audio, and apply optional anomaly filtering. Missing native duration data never turns a pause into an anomaly penalty. Thresholds still need representative calibration.                                              |
 | —              | 8, 19     | Opt-in private spool, crash recovery, failed recordings and history. Retry copies the result. Retain 20 WAVs per collection. Deletion is explicit, and recovery resumes safely after a crash during WAV promotion.                                                      |
 | A9             | 14, 16    | Added opt-in spoken punctuation, bounded restarts and filler capitalization. Exact whole-utterance commands preserve literal phrases within ordinary speech.                                                                                                            |
