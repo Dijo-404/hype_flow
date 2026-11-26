@@ -348,7 +348,9 @@ fn model_installed(model: &Path, specification: &ModelSpec) -> bool {
         })
         .sum::<Option<u64>>()
         == Some(specification.bytes)
-        && (!specification.boosting || model.join("bpe.vocab").is_file())
+        && (!specification.boosting
+            || fs::metadata(model.join("bpe.vocab"))
+                .is_ok_and(|info| info.is_file() && info.len() > 0))
 }
 
 fn exists(path: &Path) -> Result<bool> {
@@ -673,6 +675,10 @@ mod tests {
         assert!(model_installed(&valid, &installed));
         installed.boosting = true;
         assert!(!model_installed(&valid, &installed));
+        fs::write(valid.join("bpe.vocab"), b"").unwrap();
+        assert!(!model_installed(&valid, &installed));
+        fs::write(valid.join("bpe.vocab"), b"fixture").unwrap();
+        assert!(model_installed(&valid, &installed));
         installed.boosting = false;
         fs::write(valid.join("tokens.txt"), b"").unwrap();
         assert!(!model_installed(&valid, &installed));
