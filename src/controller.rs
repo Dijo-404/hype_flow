@@ -58,8 +58,14 @@ impl Session {
         !self.closing && generation == self.generation
     }
 
+    /// Ends a failed dictation; the worker restarts on the next recording, which stays allowed.
+    pub fn fail(&mut self) {
+        self.busy = false;
+        self.unloaded = true;
+    }
+
     pub fn cancel(&mut self) -> bool {
-        if matches!(self.phase, "loading" | "delivering") {
+        if !matches!(self.phase, "starting" | "recording" | "transcribing") {
             return false;
         }
         self.generation += 1;
@@ -105,5 +111,32 @@ mod tests {
         assert!(state.current(generation));
         state.closing = true;
         assert!(!state.current(generation));
+    }
+    #[test]
+    fn cancel_without_running_dictation_changes_nothing() {
+        for phase in ["idle", "done", "error", "loading", "delivering"] {
+            let mut state = Session {
+                ready: true,
+                phase,
+                generation: 7,
+                ..Session::default()
+            };
+            assert!(!state.cancel(), "{phase}");
+            assert_eq!((state.phase, state.generation), (phase, 7));
+        }
+    }
+    #[test]
+    fn press_after_failed_dictation_records_again() {
+        let mut state = Session {
+            ready: true,
+            phase: "idle",
+            ..Session::default()
+        };
+        let failed = state.start().unwrap();
+        state.stop();
+        state.fail();
+        state.phase = "error";
+        assert!(state.unloaded);
+        assert!(state.start().is_some_and(|next| next > failed));
     }
 }

@@ -31,7 +31,15 @@ const FUNCTION_WORDS: &[&str] = &[
 ];
 
 /// Adjacent repeats that are ordinary English rather than a stutter.
-const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so"];
+const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so", "bye"];
+
+/// Whether a lower-case word may repeat back to back. Dictated digits
+/// repeat too: "nine one one", "7 7 3".
+pub(crate) fn legitimate_double(word: &str) -> bool {
+    LEGITIMATE_DOUBLES.contains(&word)
+        || crate::itn::number_words().contains(word)
+        || word.chars().all(char::is_numeric)
+}
 
 /// Editing phrases that explicitly mark the preceding clause as retracted.
 /// Ordered longest-first so "i am sorry" wins over "sorry".
@@ -154,6 +162,24 @@ fn find_restart(text: &str, toks: &[Tok]) -> Option<(usize, usize, Option<String
                 if !matches {
                     continue;
                 }
+                // The reparandum has to open a sentence too, or "Email Sarah.
+                // Sarah needs the file." loses "Sarah." as a restart.
+                if j > 0 && !gap_is_sentence_boundary(text, &toks[j - 1], &toks[j]) {
+                    continue;
+                }
+                // A lone repeated word only restarts a short fragment: "Paris
+                // is lovely. Paris has great food." is two sentences.
+                if len == 1 && repair_start - j > 2 {
+                    continue;
+                }
+                // The reparandum must be a fragment: "The server crashed. The
+                // server restarted." is two sentences, "Kubernetes is." is not.
+                let fragment = toks[j + len..=i]
+                    .iter()
+                    .all(|t| t.stem.len() <= 2 || FUNCTION_WORDS.contains(&t.stem.as_str()));
+                if !fragment {
+                    continue;
+                }
                 // Never delete across a boundary that sits inside the
                 // reparandum: that would eat a whole prior sentence.
                 let crosses =
@@ -186,6 +212,21 @@ fn find_editing_phrase(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
             if start == 0 {
                 continue;
             }
+            // It must open a sentence and be set off by punctuation, or it is
+            // prose: "Don't scratch that surface.", "I'm sorry I missed it."
+            let end_tok = start + words.len() - 1;
+            let after = &text[toks[end_tok].end..];
+            let opens = if gap_is_sentence_boundary(text, &toks[start - 1], &toks[start]) {
+                after.starts_with([',', ':', '.', '!', '?'])
+            } else {
+                // An explicit command also works mid-sentence: "red, scratch that, blue".
+                matches!(*phrase, "scratch that" | "strike that")
+                    && gap_is_clause_break(text, &toks[start - 1], &toks[start])
+                    && after.starts_with([',', ';'])
+            };
+            if !opens {
+                continue;
+            }
             // The retracted clause ends just before the phrase, so start the
             // walk there rather than at the phrase itself.
             let mut clause_start = start - 1;
@@ -203,13 +244,31 @@ fn find_editing_phrase(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
             if start - clause_start > MAX_REPARANDUM_TOKENS {
                 continue;
             }
-            let end_tok = start + words.len() - 1;
+            // "I'm sorry" is usually an apology, so it only retracts a clause
+            // whose content word the repair repeats.
+            if phrase.contains("sorry") {
+                let mut repair_end = (end_tok + 2).min(toks.len());
+                while repair_end < toks.len()
+                    && !gap_is_sentence_boundary(text, &toks[repair_end - 1], &toks[repair_end])
+                {
+                    repair_end += 1;
+                }
+                let repair = &toks[(end_tok + 1).min(toks.len())..repair_end];
+                let repeated = toks[clause_start..start].iter().any(|t| {
+                    t.stem.len() >= MIN_SINGLE_ANCHOR_LEN
+                        && !FUNCTION_WORDS.contains(&t.stem.as_str())
+                        && repair.iter().any(|r| r.stem == t.stem)
+                });
+                if !repeated {
+                    continue;
+                }
+            }
             // Swallow the phrase's trailing comma and spacing.
             let mut cut_to = toks[end_tok].end;
             let tail: &str = &text[cut_to..];
             let consumed: usize = tail
                 .char_indices()
-                .take_while(|(_, c)| c.is_whitespace() || *c == ',' || *c == ':')
+                .take_while(|(_, c)| c.is_whitespace() || matches!(c, ',' | ':' | ';'))
                 .map(|(i, c)| i + c.len_utf8())
                 .last()
                 .unwrap_or(0);
@@ -238,7 +297,7 @@ fn collapse_adjacent(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
     for i in 0..toks.len().saturating_sub(1) {
         let a = &toks[i];
         let b = &toks[i + 1];
-        if a.lower != b.lower || LEGITIMATE_DOUBLES.contains(&a.lower.as_str()) {
+        if a.lower != b.lower || legitimate_double(&a.lower) {
             continue;
         }
         // Only a bare space may separate a stutter; punctuation means the

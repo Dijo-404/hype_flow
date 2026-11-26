@@ -174,6 +174,10 @@ fn config_paths_validation_and_backup_contract() {
         .env_remove("XDG_RUNTIME_DIR")
         .env("HOME", root.path());
     assert!(check.status().unwrap().success());
+    check
+        .env("XDG_DATA_HOME", "")
+        .env("XDG_CONFIG_HOME", "relative");
+    assert!(check.status().unwrap().success());
     let xdg = root.path().join("xdg");
     fs::create_dir(&xdg).unwrap();
     check
@@ -184,7 +188,7 @@ fn config_paths_validation_and_backup_contract() {
 }
 
 fn check_config_paths(root: &std::path::Path) {
-    if std::env::var_os("XDG_CONFIG_HOME").is_none() {
+    if std::env::var_os("XDG_CONFIG_HOME").is_none_or(|value| value == "relative") {
         assert_eq!(config::config_dir(), root.join(".config/hype-flow"));
         assert_eq!(config::data_dir(), root.join(".local/share/hype-flow"));
         assert!(config::runtime_dir().is_err());
@@ -266,7 +270,7 @@ fn check_config_paths(root: &std::path::Path) {
         );
     }
     let original = format!(
-        "model = \"{0}/models/ggml-large-v3.bin\"\nserver = \"{0}/backend/whisper-server-linux-x64-vulkan\"\nprompt = \"Saved names\"\npaste = false\nboost_score = 2\n",
+        "model = \"{0}/models/ggml-large-v3.bin\"\nserver = \"{0}/backend/whisper-server-linux-x64-vulkan\"\ngpu = true\nprompt = \"Saved names\"\npaste = false\nboost_score = 2\n",
         directory.display(),
     );
     fs::write(&path, &original).unwrap();
@@ -277,12 +281,14 @@ fn check_config_paths(root: &std::path::Path) {
     assert_eq!(values.boost_score, 2.0);
     assert!(!values.paste);
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    assert!(Config::from_table(toml::from_str("gpu = false").unwrap()).is_ok());
 
     values.model = root.join("custom/model").display().to_string();
     values.server = root.join("custom/recognizer").display().to_string();
     values.prompt = "नमस्ते, \"niri\"\nproject".into();
     values.save().unwrap();
     assert_eq!(Config::load().unwrap(), values);
+    assert!(!fs::read_to_string(&path).unwrap().contains("gpu"));
     assert_eq!(fs::read_to_string(&backup).unwrap(), original);
     for saved in [&path, &backup] {
         assert_eq!(

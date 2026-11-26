@@ -1,5 +1,5 @@
 //! Opt-in audio recovery. No audio is persisted unless enabled in settings.
-use crate::backend::{PCM_LIMIT, wav_bytes};
+use crate::backend::{PCM_LIMIT, pcm_from_wav, wav_header};
 use anyhow::{Context, Result, ensure};
 use std::{
     env,
@@ -113,8 +113,11 @@ pub fn retain(path: &Path, kind: &str) -> Result<Option<PathBuf>> {
     temporary
         .as_file()
         .set_permissions(fs::Permissions::from_mode(0o600))?;
-    let expected = wav_bytes(&audio);
-    temporary.write_all(&expected)?;
+    // Write the header, then the spool, instead of building a second full-size WAV.
+    let header = wav_header(audio.len());
+    let expected = header.len() + audio.len();
+    temporary.write_all(&header)?;
+    temporary.write_all(&audio)?;
     temporary.as_file().sync_all()?;
     if let Err(error) = temporary.persist_noclobber(&target) {
         if error.error.kind() != std::io::ErrorKind::AlreadyExists {
@@ -130,16 +133,14 @@ pub fn retain(path: &Path, kind: &str) -> Result<Option<PathBuf>> {
             metadata.is_file()
                 && metadata.uid() == unsafe { libc::getuid() }
                 && metadata.mode() & 0o077 == 0
-                && metadata.len() == expected.len() as u64,
+                && metadata.len() == expected as u64,
             "Conflicting saved recording: {}",
             target.display()
         );
-        let mut bytes = Vec::with_capacity(expected.len());
-        existing
-            .take(expected.len() as u64 + 1)
-            .read_to_end(&mut bytes)?;
+        let mut bytes = Vec::with_capacity(expected);
+        existing.take(expected as u64 + 1).read_to_end(&mut bytes)?;
         ensure!(
-            bytes == expected,
+            bytes.strip_prefix(header.as_slice()) == Some(audio.as_slice()),
             "Conflicting saved recording: {}",
             target.display()
         );
@@ -197,26 +198,13 @@ pub fn last(kind: &str) -> Result<Vec<u8>> {
         metadata.is_file() && metadata.uid() == unsafe { libc::getuid() },
         "Unsafe saved recording"
     );
-    let mut audio = hound::WavReader::new(file)?;
-    let spec = audio.spec();
-    ensure!(
-        spec.channels == 1
-            && spec.sample_rate == 16_000
-            && spec.bits_per_sample == 16
-            && spec.sample_format == hound::SampleFormat::Int
-            && audio.duration() as usize <= PCM_LIMIT / 2,
-        "Invalid saved recording WAV"
-    );
-    let mut pcm = Vec::with_capacity(audio.duration() as usize * 2);
-    for sample in audio.samples::<i16>() {
-        pcm.extend_from_slice(&sample?.to_le_bytes());
-    }
-    Ok(pcm)
+    pcm_from_wav(file).context("Invalid saved recording WAV")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::wav_bytes;
     #[test]
     fn recovery_is_private_bounded_and_ignores_symlinks() {
         // A subprocess keeps XDG changes isolated from parallel Rust tests.

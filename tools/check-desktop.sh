@@ -3,7 +3,7 @@
 set -eu
 project=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project"
-cargo_bin=${CARGO:-"$HOME/.cargo/bin/cargo"}
+cargo_bin=${CARGO:-cargo}
 export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 "$cargo_bin" test --test rust_desktop -- --ignored --test-threads=1
 "$cargo_bin" build --bin hype-flow

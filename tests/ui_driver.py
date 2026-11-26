@@ -88,20 +88,25 @@ def main():
         for directory in (model, backend, config, fake):
             directory.mkdir(parents=True)
         for name in ("model.int8.onnx", "tokens.txt"):
-            (model / name).touch()
+            (model / name).write_bytes(b"0")
         for name in ("silero_vad.onnx", "gtcrn_simple.onnx"):
-            (model.parent / name).touch()
-        (backend / "recognizer.version").write_text("8\n")
-        worker_started = root / "worker-started"
+            (model.parent / name).write_bytes(b"0")
+        (backend / "recognizer.version").write_text("9\n")
+        # The sandboxed worker cannot write host files, so it reports through its log.
+        worker_log = Path(os.environ["XDG_RUNTIME_DIR"]) / "hype-flow/backend.log"
+        worker_marker = f"fake worker started in {root}"
+
+        def worker_started():
+            return worker_log.exists() and worker_marker in worker_log.read_text()
+
         write_executable(
             backend / "recognizer",
             "#!"
             + sys.executable
             + "\n"
             + r"""
-from pathlib import Path
 import json, os, struct, sys, time
-Path(os.environ["HYPE_TEST_WORKER_STARTED"]).touch()
+print(os.environ["HYPE_TEST_WORKER_STARTED"], file=sys.stderr, flush=True)
 def send(value):
     data = json.dumps(value).encode()
     sys.stdout.buffer.write(struct.pack("<I", len(data)) + data)
@@ -168,7 +173,7 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
         }
         short_capture = root / "short-capture"
         env["HYPE_TEST_SHORT_CAPTURE"] = str(short_capture)
-        env["HYPE_TEST_WORKER_STARTED"] = str(worker_started)
+        env["HYPE_TEST_WORKER_STARTED"] = worker_marker
         log = (root / "app.log").open("wb")
         app = subprocess.Popen(
             [executable, "--background"],
@@ -200,13 +205,13 @@ os.execv("/usr/bin/niri", ["/usr/bin/niri", *sys.argv[1:]])
 
         try:
             wait(lambda: group.has_action("toggle") and phase("idle"), "ready actions")
-            assert not worker_started.exists(), "Speech worker started before dictation"
+            assert not worker_started(), "Speech worker started before dictation"
             for name in ("toggle", "cancel", "show", "copy-last", "copy-raw", "quit"):
                 assert group.has_action(name), name
             short_capture.touch()
             group.activate_action("toggle", None)
             wait(lambda: phase("recording"), "short recording starts")
-            wait(worker_started.exists, "first dictation starts the speech worker")
+            wait(worker_started, "first dictation starts the speech worker")
             group.activate_action("toggle", None)
             wait(lambda: phase("done"), "short recording rejected")
             assert "Recording too short" in state()[1], state()

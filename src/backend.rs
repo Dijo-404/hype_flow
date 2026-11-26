@@ -5,11 +5,13 @@ use crate::setup::{model_files, variant_for_path};
 use crate::vocabulary::hotwords;
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
+use std::env;
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,20 +23,57 @@ pub(crate) const PCM_LIMIT: usize = RATE * MAX_SECONDS * 2;
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 const DECODE_TIMEOUT: Duration = Duration::from_secs(600);
-const SANDBOX_ARGS: &[&str] = &[
-    "--unshare-net",
-    "--unshare-pid",
-    "--dev-bind",
-    "/",
-    "/",
-    "--proc",
-    "/proc",
-    "--",
-];
+static SANDBOX_WORKS: AtomicBool = AtomicBool::new(false);
+
+fn bubblewrap(reads: &[&Path]) -> Command {
+    let mut command = Command::new("bwrap");
+    // /run holds system path sockets (Docker, system bus) that a read-only mount still connects to.
+    command.args([
+        "--unshare-net",
+        "--unshare-pid",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--tmpfs",
+        "/tmp",
+        "--tmpfs",
+        "/run",
+    ]);
+    // Path sockets such as the session bus still connect across a network namespace.
+    let shared = env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_dir());
+    if let Some(shared) = &shared {
+        command.arg("--tmpfs").arg(shared);
+    }
+    // Later mounts win: re-expose what the recognizer reads, never a hidden root itself.
+    let hidden = [Path::new("/tmp"), Path::new("/run")];
+    for path in reads {
+        if !hidden
+            .into_iter()
+            .chain(shared.as_deref())
+            .any(|root| root.starts_with(path))
+        {
+            command.arg("--ro-bind").arg(path).arg(path);
+        }
+    }
+    command.arg("--");
+    command
+}
 
 pub fn wav_bytes(pcm: &[u8]) -> Vec<u8> {
-    let size = pcm.len() as u32;
-    let mut wav = Vec::with_capacity(44 + pcm.len());
+    let mut wav = wav_header(pcm.len());
+    wav.extend_from_slice(pcm);
+    wav
+}
+
+pub(crate) fn wav_header(pcm_len: usize) -> Vec<u8> {
+    let size = pcm_len as u32;
+    let mut wav = Vec::with_capacity(44);
     wav.extend_from_slice(b"RIFF");
     wav.extend_from_slice(&(36 + size).to_le_bytes());
     wav.extend_from_slice(b"WAVEfmt ");
@@ -44,12 +83,16 @@ pub fn wav_bytes(pcm: &[u8]) -> Vec<u8> {
     wav.extend_from_slice(&[2, 0, 16, 0]);
     wav.extend_from_slice(b"data");
     wav.extend_from_slice(&size.to_le_bytes());
-    wav.extend_from_slice(pcm);
     wav
 }
 
 pub fn read_wav(path: &Path) -> Result<Vec<u8>> {
-    let mut audio = hound::WavReader::open(path).context("Could not read PCM WAV")?;
+    pcm_from_wav(File::open(path).context("Could not read PCM WAV")?)
+}
+
+pub(crate) fn pcm_from_wav(reader: impl Read) -> Result<Vec<u8>> {
+    let mut audio =
+        hound::WavReader::new(io::BufReader::new(reader)).context("Could not read PCM WAV")?;
     let spec = audio.spec();
     ensure!(
         spec.channels == 1
@@ -409,18 +452,28 @@ impl Engine {
         );
 
         let cancelled = || self.cancelled(epoch) || external_cancelled();
-        let sandbox = run_command_until(
-            Command::new("bwrap").args(SANDBOX_ARGS).arg("true"),
-            None,
-            Duration::from_secs(5),
-            true,
-            cancelled,
-        )
-        .is_ok_and(|output| output.status.success());
+        let server = Path::new(&config.server);
+        // Parents also cover the VAD and denoiser beside the model and the worker's lib/.
+        let reads = [
+            self.runtime.as_path(),
+            model.parent().unwrap_or(model),
+            server.parent().unwrap_or(server),
+        ];
+        let sandbox = SANDBOX_WORKS.load(Ordering::Relaxed)
+            || run_command_until(
+                bubblewrap(&reads).arg("true"),
+                None,
+                Duration::from_secs(5),
+                true,
+                cancelled,
+            )
+            .is_ok_and(|output| output.status.success());
+        // Remember only success, so a transient failure is probed again next start.
+        SANDBOX_WORKS.fetch_or(sandbox, Ordering::Relaxed);
         ensure!(!cancelled(), "Speech backend startup cancelled");
         let mut command = if sandbox {
-            let mut command = Command::new("bwrap");
-            command.args(SANDBOX_ARGS).arg(&config.server);
+            let mut command = bubblewrap(&reads);
+            command.arg(server);
             command
         } else {
             Command::new(&config.server)

@@ -88,15 +88,45 @@ mod tests {
     }
     #[test]
     fn bounded_restart_port_preserves_prose_and_negation() {
-        assert_eq!(
-            crate::restarts::collapse_restarts("We need red. I mean, blue."),
-            "Blue."
-        );
+        for (text, expected) in [
+            ("We need red. I mean, blue.", "Blue."),
+            (
+                "Send the report to. Send the report to Alice.",
+                "Send the report to Alice.",
+            ),
+            (
+                "It runs after the model. I'm sorry, it runs before the model.",
+                "It runs before the model.",
+            ),
+            ("We need red. Scratch that. Blue.", "Blue."),
+            ("We need red, scratch that, blue.", "Blue."),
+            ("We need red; strike that; blue.", "Blue."),
+            (
+                "Kubernetes is. Kubernetes clusters scale.",
+                "Kubernetes clusters scale.",
+            ),
+        ] {
+            assert_eq!(crate::restarts::collapse_restarts(text), expected);
+        }
         for text in [
             "I like it. It is good.",
             "That is the plan. That is what we agreed.",
             "No no, I had had enough.",
             "I do not want to cancel.",
+            "Email Sarah. Sarah needs the file.",
+            "We need the database. The database is down.",
+            "Send it to Bob, I mean Alice.",
+            "Hi John. I'm sorry I missed your call.",
+            "Don't scratch that surface.",
+            "Hi John. I'm sorry, I missed your call.",
+            "Paris is lovely. Paris has great food.",
+            "Sarah called. Sarah needs the file.",
+            "The server crashed. The server restarted fine.",
+            "The database is down. The database team is on it.",
+            "Monday works. Monday is fine too.",
+            "Prices rose. Prices fell sharply.",
+            "The report is late. The report needs review.",
+            "It's red, or rather, crimson.",
         ] {
             assert_eq!(crate::restarts::collapse_restarts(text), text);
         }

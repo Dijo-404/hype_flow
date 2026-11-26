@@ -82,13 +82,12 @@ struct Session {
     on_end: EndCallback,
     pieces: Option<PieceQueue>,
     spool: Option<File>,
-    spool_failure: Option<String>,
 }
 
 impl Session {
     fn new(on_frame: FrameCallback, on_end: EndCallback) -> Self {
         Self {
-            pcm: VecDeque::with_capacity(PCM_LIMIT),
+            pcm: VecDeque::new(),
             started: Instant::now(),
             received: false,
             ended: false,
@@ -99,7 +98,17 @@ impl Session {
             on_end,
             pieces: None,
             spool: None,
-            spool_failure: None,
+        }
+    }
+
+    /// Recovery audio is optional; losing it must not lose the dictation.
+    fn spool_failed(&mut self, error: io::Error) {
+        eprintln!("Could not save recovery audio: {error}");
+        // An empty spool is discarded instead of being kept as a partial recording.
+        if let Some(spool) = self.spool.take()
+            && let Err(error) = spool.set_len(0)
+        {
+            eprintln!("Could not discard partial recovery audio: {error}");
         }
     }
 
@@ -117,8 +126,7 @@ impl Session {
         if let Some(spool) = &mut self.spool
             && let Err(error) = spool.write_all(data)
         {
-            self.spool_failure = Some(format!("Could not save recovery audio: {error}"));
-            return (None, self.end());
+            self.spool_failed(error);
         }
         self.recorded += accepted;
         let overflow = (self.pcm.len() + accepted).saturating_sub(PCM_LIMIT);
@@ -132,8 +140,13 @@ impl Session {
             )
         {
             let piece = self.pcm.range(..cut).copied().collect();
-            if queue.sender.try_send(piece).is_ok() {
-                self.pcm.drain(..cut);
+            match queue.sender.try_send(piece) {
+                Ok(()) => {
+                    self.pcm.drain(..cut);
+                }
+                // The eager decoder has stopped, so stop copying pieces for it.
+                Err(mpsc::TrySendError::Disconnected(_)) => self.pieces = None,
+                Err(mpsc::TrySendError::Full(_)) => {}
             }
         }
 
@@ -448,10 +461,10 @@ impl Recorder {
                 let mut state = capture.state.lock().unwrap();
                 if !state.closed && state.expires.is_some_and(|expiry| expiry > Instant::now()) {
                     session.pcm.extend(state.ring.drain(..));
-                    if let Some(spool) = &mut session.spool {
-                        spool
-                            .write_all(session.pcm.make_contiguous())
-                            .context("Save microphone preroll for recovery")?;
+                    if let Some(spool) = &mut session.spool
+                        && let Err(error) = spool.write_all(session.pcm.make_contiguous())
+                    {
+                        session.spool_failed(error);
                     }
                     session.received = true;
                     state.session = Some(session);
@@ -596,15 +609,12 @@ impl Recorder {
         } = self;
         let (session, parked, old_error) = {
             let mut state = capture.state.lock().unwrap();
-            let session = state
+            let mut session = state
                 .session
                 .take()
                 .context("Microphone is not recording")?;
-            if let Some(error) = &session.spool_failure {
-                bail!("{error}");
-            }
-            if let Some(file) = &session.spool {
-                file.sync_data().context("Save recording recovery spool")?;
+            if let Some(Err(error)) = session.spool.as_ref().map(File::sync_data) {
+                session.spool_failed(error);
             }
             let parked = hold && !state.closed;
             if parked {
@@ -637,4 +647,52 @@ pub fn release() {
         idle.capture.take()
     };
     drop(capture);
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use std::os::fd::FromRawFd;
+
+    fn session() -> Session {
+        Session::new(Arc::new(|_, _| {}), Arc::new(|| {}))
+    }
+
+    #[test]
+    fn stopped_eager_decoder_stops_piece_copies_and_keeps_pcm() {
+        let mut session = session();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(receiver);
+        session.pieces = Some(PieceQueue {
+            sender,
+            maximum_seconds: 5,
+            ctc: false,
+        });
+        for _ in 0..7 * RATE * 2 / CHUNK {
+            session.feed(&[0; CHUNK]);
+        }
+        assert!(session.pieces.is_none());
+        assert_eq!(session.pcm.len(), 7 * RATE * 2);
+    }
+
+    #[test]
+    fn spool_failure_keeps_recording_and_empties_the_spool() {
+        let mut session = session();
+        // A memfd sealed against growth rejects writes but still allows truncation.
+        let fd = unsafe { libc::memfd_create(c"spool".as_ptr(), libc::MFD_ALLOW_SEALING) };
+        assert!(fd >= 0);
+        let mut spool = unsafe { File::from_raw_fd(fd) };
+        spool.write_all(&[1; 4]).unwrap();
+        assert_eq!(
+            unsafe { libc::fcntl(fd, libc::F_ADD_SEALS, libc::F_SEAL_GROW) },
+            0
+        );
+        session.spool = Some(spool.try_clone().unwrap());
+        let (_, ended) = session.feed(&[0; CHUNK]);
+        assert!(ended.is_none() && !session.ended);
+        assert!(session.spool.is_none());
+        assert_eq!(spool.metadata().unwrap().len(), 0);
+        session.feed(&[0; CHUNK]);
+        assert_eq!(session.pcm.len(), 2 * CHUNK);
+    }
 }

@@ -165,7 +165,7 @@ See the [annotated config](docs/config.toml) for all options and defaults and th
 | Variable          | Effect                                                                                      |
 | :---------------- | :------------------------------------------------------------------------------------------ |
 | `XDG_CONFIG_HOME` | Settings base directory. Defaults to `~/.config`.                                           |
-| `XDG_DATA_HOME`   | Models, native runtime, launcher assets, and install backups. Defaults to `~/.local/share`. |
+| `XDG_DATA_HOME`   | Models, native runtime, and launcher assets. Defaults to `~/.local/share`.                  |
 | `XDG_STATE_HOME`  | Root for opt-in recording retention. Defaults to `~/.local/state`.                          |
 | `XDG_RUNTIME_DIR` | Required by the desktop app for private runtime files. Your session sets it.                |
 | `NIRI_CONFIG`     | Override which niri config setup and shortcut changes modify.                               |
@@ -176,7 +176,7 @@ See the [annotated config](docs/config.toml) for all options and defaults and th
 | :-------------------------------- | :---------------------------------------------------------------------------------------------------------- |
 | `~/.config/hype-flow/config.toml` | Preferences. Model activation saves the previous config as `config.toml.previous`.                          |
 | `~/.config/niri/hype-flow.kdl`    | Managed bindings and autostart. Setup adds an include and saves timestamped backups beside the niri config. |
-| `~/.local/share/hype-flow/`       | Speech models, inference runtime, setup cache, and installer rollback files.                                |
+| `~/.local/share/hype-flow/`       | Speech models, inference runtime, and setup cache.                                                          |
 | `$XDG_RUNTIME_DIR/hype-flow/`     | Latest original and cleaned transcripts and `backend.log`.                                                  |
 | `~/.local/state/hype-flow/`       | Opt-in recovery and history audio. Each collection keeps its latest 20 recordings.                          |
 

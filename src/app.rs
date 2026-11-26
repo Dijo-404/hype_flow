@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-type Transcript = (String, String, Option<String>, bool);
+type Transcript = (String, String, Option<String>, bool, std::time::Instant);
 const MIN_RECORDING_BYTES: usize = crate::backend::RATE * 2 * 3 / 10;
 const SHORT_RECORDING: &str = "Recording too short (minimum 300 ms)";
 
@@ -47,6 +47,7 @@ enum Event {
     Transcribed(u64, Result<Transcript>),
     Delivered(u64, Result<String>),
     Downloaded(String, Result<(String, String)>),
+    Saved(Box<Config>, Result<()>),
     Recovered(Result<usize>),
     Notice(String),
     Quit,
@@ -101,6 +102,28 @@ fn write_private(path: &std::path::Path, text: &str) -> Result<()> {
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
     file.write_all(text.as_bytes())?;
     Ok(())
+}
+
+/// Settings the speech worker reads at startup; changing one restarts it.
+fn worker_changed(old: &Config, new: &Config) -> bool {
+    old.model != new.model
+        || old.server != new.server
+        || old.language != new.language
+        || old.threads != new.threads
+        || old.blank_penalty != new.blank_penalty
+        || old.max_active_paths != new.max_active_paths
+        || old.vad_threshold != new.vad_threshold
+        || old.vad_min_silence != new.vad_min_silence
+        || old.max_piece_seconds != new.max_piece_seconds
+        || old.vocabulary_boosting != new.vocabulary_boosting
+        || new.vocabulary_boosting
+            && (old.prompt != new.prompt || old.boost_score != new.boost_score)
+        || old.cut_silence != new.cut_silence
+        || old.noise_suppression != new.noise_suppression
+        || old.normalize_gain != new.normalize_gain
+        || old.feature_dim != new.feature_dim
+        || old.provider != new.provider
+        || old.soft_speech_retry != new.soft_speech_retry
 }
 
 fn finish_recognition(
@@ -169,7 +192,7 @@ impl AppState {
         if changed && let Some(home) = &self.home {
             home.update(phase, message, setup::assets_ready(&self.values));
         }
-        if !matches!(phase, "idle" | "done") {
+        if !matches!(phase, "idle" | "done" | "error") {
             if let Some(timer) = self.unloading.take() {
                 timer.remove();
             }
@@ -189,7 +212,7 @@ impl AppState {
                     if let Some(app) = weak.upgrade() {
                         let mut app = app.borrow_mut();
                         app.unloading.take();
-                        if matches!(app.session.phase, "idle" | "done")
+                        if matches!(app.session.phase, "idle" | "done" | "error")
                             && !app.session.busy
                             && app.recorder.is_none()
                         {
@@ -280,11 +303,12 @@ impl AppState {
                     self.show();
                     return;
                 }
-                if !matches!(self.session.phase, "starting" | "recording")
-                    && !self.session.busy
-                    && self.session.ready
-                {
-                    self.start();
+                if !matches!(self.session.phase, "starting" | "recording") && !self.session.busy {
+                    if self.session.ready {
+                        self.start();
+                    } else {
+                        self.warm();
+                    }
                 }
             }
             "release" => {
@@ -312,8 +336,11 @@ impl AppState {
                 if matches!(self.session.phase, "starting" | "recording") {
                     self.stop();
                 } else if self.session.busy {
-                    let last = self.last.clone();
-                    self.publish(last.0, &last.1, true, last.3, last.4);
+                    // Busy while idle is a shortcut save, which has no progress to show.
+                    if self.session.phase != "idle" {
+                        let last = self.last.clone();
+                        self.publish(last.0, &last.1, true, last.3, last.4);
+                    }
                 } else if !self.session.ready {
                     self.warm();
                 } else {
@@ -341,14 +368,8 @@ impl AppState {
         if self.values.pause_media {
             self.media.pause();
         }
-        if self.session.unloaded {
-            self.session.unloaded = false;
-            let engine = self.engine.clone();
-            let epoch = engine.recording_epoch();
-            self.workers.push(thread::spawn(move || {
-                let _ = engine.ensure_scoped(epoch, &|| false);
-            }));
-        }
+        // The eager capture thread loads the worker as soon as the microphone opens.
+        self.session.unloaded = false;
         let tx = self.tx.clone();
         let target = self.values.input_target.clone();
         let hold = self.values.keep_mic_ready;
@@ -408,6 +429,7 @@ impl AppState {
         let runtime = self.runtime.clone();
         let recording_epoch = engine.recording_epoch();
         let spool = self.recording_spool.take();
+        let stopped = std::time::Instant::now();
         self.workers.push(thread::spawn(move || {
             let cancelled = || generation != live.load(Ordering::Acquire);
             let mut recording_too_short = false;
@@ -433,7 +455,7 @@ impl AppState {
                 committed.append(tail, tail_offset);
                 let silent = committed.text.is_empty() && !pcm.iter().any(|byte| *byte != 0);
                 let (raw, text, note) = finish_recognition(committed, &values, cancelled)?;
-                Ok((raw, text, note, silent))
+                Ok((raw, text, note, silent, stopped))
             })();
             if let Some(path) = spool.as_deref() {
                 if cancelled() || recording_too_short {
@@ -460,12 +482,10 @@ impl AppState {
     }
 
     fn cancel(&mut self) {
-        if self.session.phase == "loading" {
+        if !self.session.cancel() {
+            // Nothing to abort: dismiss the capsule and keep a warm worker loaded.
             let last = self.last.clone();
             self.publish(last.0, &last.1, false, last.3, last.4);
-            return;
-        }
-        if !self.session.cancel() {
             return;
         }
         self.live.store(self.session.generation, Ordering::Release);
@@ -478,9 +498,11 @@ impl AppState {
                 drop(recorder);
                 recovery::discard(spool.as_deref());
             }));
+        } else {
+            // A pending opener or the stop thread owns the eager decoder; only a new epoch aborts it.
+            self.session.unloaded = true;
+            self.workers.push(self.engine.stop_in_background());
         }
-        self.session.unloaded = true;
-        self.workers.push(self.engine.stop_in_background());
         self.session.busy = false;
         self.publish("idle", "Cancelled", false, 0.0, 0.0);
     }
@@ -499,38 +521,28 @@ impl AppState {
         let shortcuts_changed = values.dictation_shortcut != self.values.dictation_shortcut
             || values.cancel_shortcut != self.values.cancel_shortcut
             || values.dictation_mode != self.values.dictation_mode;
-        let saved = if shortcuts_changed {
-            shortcuts::save(&values).map(|_| ())
-        } else {
-            values.save()
-        };
+        if shortcuts_changed {
+            // niri validation can take seconds; busy blocks dictation and saves until Saved.
+            self.session.busy = true;
+            let tx = self.tx.clone();
+            self.workers.push(thread::spawn(move || {
+                let saved = shortcuts::save(&values).map(|_| ());
+                let _ = tx.send_blocking(Event::Saved(Box::new(values), saved));
+            }));
+            return false;
+        }
+        let saved = values.save();
+        self.apply(values, saved, false)
+    }
+
+    fn apply(&mut self, values: Config, saved: Result<()>, shortcuts_changed: bool) -> bool {
         if let Err(error) = saved {
             if let Some(home) = &self.home {
                 home.feedback(&format!("{error:#}"));
             }
             return false;
         }
-        let old = &self.values;
-        let reload = old.model != values.model
-            || old.server != values.server
-            || old.language != values.language
-            || old.threads != values.threads
-            || old.blank_penalty != values.blank_penalty
-            || old.max_active_paths != values.max_active_paths
-            || old.vad_threshold != values.vad_threshold
-            || old.vad_min_silence != values.vad_min_silence
-            || old.max_piece_seconds != values.max_piece_seconds
-            || old.prompt != values.prompt
-            || old.vocabulary_boosting != values.vocabulary_boosting
-            || old.boost_score != values.boost_score
-            || old.cut_silence != values.cut_silence
-            || old.noise_suppression != values.noise_suppression
-            || old.normalize_gain != values.normalize_gain
-            || old.feature_dim != values.feature_dim
-            || old.provider != values.provider
-            || old.soft_speech_retry != values.soft_speech_retry
-            || old.hallucination_filtering != values.hallucination_filtering
-            || old.anomaly_threshold != values.anomaly_threshold;
+        let reload = worker_changed(&self.values, &values);
         self.values = values;
         if let Some(timer) = self.unloading.take() {
             timer.remove();
@@ -538,19 +550,22 @@ impl AppState {
         if !self.values.keep_mic_ready {
             audio::release();
         }
+        let mut last = self.last.clone();
         if reload || !self.session.ready {
             self.session.generation += 1;
             self.live.store(self.session.generation, Ordering::Release);
             self.workers.push(self.engine.stop_in_background());
             self.engine = Arc::new(Engine::new(self.values.clone(), self.runtime.clone()));
             if setup::assets_ready(&self.values) {
-                self.warm();
+                // Load lazily like startup; a bad setting surfaces on the next dictation.
+                self.session.ready = true;
+                self.session.unloaded = true;
+                last = ("idle", "Ready".into(), false, 0.0, 0.0);
             }
         }
         if let Some(home) = &self.home {
             home.feedback("Settings saved");
         }
-        let last = self.last.clone();
         let message = if shortcuts_changed {
             format!(
                 "Shortcuts saved. {} starts dictation.",
@@ -605,7 +620,7 @@ impl AppState {
                 engine.ensure_scoped(epoch, &cancelled)?;
                 let transcript = engine.transcribe_detailed_scoped(&pcm, epoch, &cancelled)?;
                 let (raw, text, note) = finish_recognition(transcript, &values, cancelled)?;
-                Ok((raw, text, note, false))
+                Ok((raw, text, note, false, std::time::Instant::now()))
             })();
             let _ = tx.send_blocking(Event::Transcribed(generation, result));
         }));
@@ -641,7 +656,7 @@ impl AppState {
                 match result {
                     Ok(()) => self.publish("idle", "Ready", false, 0.0, 0.0),
                     Err(error) => {
-                        self.engine.stop();
+                        self.workers.push(self.engine.stop_in_background());
                         self.publish("error", &format!("{error:#}"), true, 0.0, 0.0);
                     }
                 }
@@ -700,11 +715,11 @@ impl AppState {
                 self.session.busy = false;
                 match result {
                     Err(error) => {
-                        self.session.ready = false;
-                        self.engine.stop();
+                        self.session.fail();
+                        self.workers.push(self.engine.stop_in_background());
                         self.publish("error", &format!("{error:#}"), true, 0.0, 0.0);
                     }
-                    Ok((raw, text, note, silent)) => {
+                    Ok((raw, text, note, silent, stopped)) => {
                         self.session.ready = true;
                         if raw.is_empty() {
                             self.publish(
@@ -738,7 +753,8 @@ impl AppState {
                         if text.is_empty() {
                             self.publish(
                                 "done",
-                                "All words filtered · original saved",
+                                note.as_deref()
+                                    .unwrap_or("All words filtered · original saved"),
                                 true,
                                 0.0,
                                 0.0,
@@ -759,6 +775,7 @@ impl AppState {
                                 values.trailing_space,
                                 values.press_enter,
                                 values.modifier_release_guard,
+                                stopped,
                                 || generation != live.load(Ordering::Acquire),
                             )
                             .map(|message| {
@@ -786,6 +803,14 @@ impl AppState {
                     ),
                 }
             }
+            Event::Saved(values, saved) => {
+                self.session.busy = false;
+                if self.apply(*values, saved, true)
+                    && let Some(home) = &self.home
+                {
+                    home.saved(self.values.clone());
+                }
+            }
             Event::Downloaded(variant, result) => {
                 self.downloading = false;
                 if let Some(home) = &self.home {
@@ -807,14 +832,17 @@ impl AppState {
                         if !spec.boosting {
                             values.vocabulary_boosting = false;
                         }
-                        values.model = model;
+                        values.model = model.clone();
                         values.server = server;
                         values.language = "en".into();
-                        values.gpu = false;
                         if self.save(values)
                             && let Some(home) = &self.home
                         {
                             home.saved(self.values.clone());
+                        }
+                        // Load the installed model now so a broken install fails here, not after a dictation.
+                        if self.values.model == model {
+                            self.warm();
                         }
                     }
                     Err(error) => self.publish("error", &format!("{error:#}"), false, 0.0, 0.0),
@@ -1134,5 +1162,38 @@ mod finish_tests {
         assert!(cleaned.is_empty());
         assert!(notice.unwrap().contains("original saved"));
         assert!(finish_recognition(transcript, &values, || true).is_err());
+    }
+
+    #[test]
+    fn only_settings_the_worker_reads_restart_it() {
+        let old = Config {
+            vocabulary_boosting: false,
+            ..Config::default()
+        };
+        let app_only = Config {
+            hallucination_filtering: !old.hallucination_filtering,
+            anomaly_threshold: old.anomaly_threshold + 1.0,
+            prompt: "Hype Flow".into(),
+            boost_score: old.boost_score + 1.0,
+            ..old.clone()
+        };
+        assert!(!worker_changed(&old, &app_only));
+        let boosted = Config {
+            vocabulary_boosting: true,
+            ..old.clone()
+        };
+        assert!(worker_changed(&old, &boosted));
+        for changed in [
+            Config {
+                prompt: "Hype Flow".into(),
+                ..boosted.clone()
+            },
+            Config {
+                boost_score: boosted.boost_score + 1.0,
+                ..boosted.clone()
+            },
+        ] {
+            assert!(worker_changed(&boosted, &changed));
+        }
     }
 }

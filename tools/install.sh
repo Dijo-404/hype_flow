@@ -4,21 +4,14 @@ set -eu
 
 project=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 prefix=${HYPE_FLOW_PREFIX:-"$HOME/.local"}
-data=${XDG_DATA_HOME:-"$HOME/.local/share"}/hype-flow
 applications=${XDG_DATA_HOME:-"$HOME/.local/share"}/applications
 icons=${XDG_DATA_HOME:-"$HOME/.local/share"}/icons/hicolor/scalable/apps
 private_lib="$prefix/share/hype-flow/lib"
-mkdir -p "$prefix/bin" "$private_lib" "$data/rollback" "$applications" "$icons"
+mkdir -p "$prefix/bin" "$private_lib" "$applications" "$icons"
 test -x "$project/target/release/hype-flow"
 test -x "$project/target/release/hype-flow-evaluate"
 test -x "$project/target/release/hype-flow-recognizer"
 
-if [ -f "$prefix/bin/hype-flow" ] && [ ! -f "$data/rollback/hype-flow" ]; then
-    cp -p "$prefix/bin/hype-flow" "$data/rollback/hype-flow"
-fi
-if [ -f "$applications/dev.hype.Flow.desktop" ] && [ ! -f "$data/rollback/dev.hype.Flow.desktop" ]; then
-    cp -p "$applications/dev.hype.Flow.desktop" "$data/rollback/dev.hype.Flow.desktop"
-fi
 if pkg-config --exists gtk4-layer-shell-0; then
     library_dir=$(pkg-config --variable=libdir gtk4-layer-shell-0)
     library_stage=$(mktemp "$private_lib/.layer-shell.XXXXXX")
@@ -55,4 +48,3 @@ chmod 644 "$desktop_stage"
 mv -f "$desktop_stage" "$applications/dev.hype.Flow.desktop"
 trap - EXIT HUP INT TERM
 printf 'Installed %s\n' "$prefix/bin/hype-flow"
-printf 'Previous launcher retained in %s\n' "$data/rollback"

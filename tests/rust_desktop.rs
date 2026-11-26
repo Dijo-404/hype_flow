@@ -213,6 +213,9 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     );
     assert_eq!(overlay.window.layer(), gtk4_layer_shell::Layer::Overlay);
     assert!(overlay.window.is_visible());
+    overlay.window.set_tooltip_text(Some("unchanged"));
+    overlay.update("recording", "Listening", true, 0.6, 3.1);
+    assert_eq!(overlay.window.tooltip_text().as_deref(), Some("unchanged"));
     overlay.update("idle", "Ready", false, 0.0, 0.0);
     assert!(!overlay.window.is_visible());
     overlay.window.close();

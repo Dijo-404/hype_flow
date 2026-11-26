@@ -251,5 +251,120 @@
       "vocabulary_boosting": true
     },
     "output": "Postgres is useful and OpenAI works with Sinead"
+  },
+  {
+    "input": "Back in twenty twenty we moved.",
+    "settings": { "format_numbers": true },
+    "output": "Back in 2020 we moved."
+  },
+  {
+    "input": "Call five five five one two one two.",
+    "settings": { "format_numbers": true, "remove_repetitions": true },
+    "output": "Call 5551212."
+  },
+  {
+    "input": "It took two to three hours. It costs between five and ten dollars.",
+    "settings": { "format_numbers": true },
+    "output": "It took two to three hours. It costs between five and ten dollars."
+  },
+  {
+    "input": "It costs five or ten dollars, between five and ten minutes.",
+    "settings": { "format_numbers": true },
+    "output": "It costs five or ten dollars, between five and ten minutes."
+  },
+  {
+    "input": "Meet at three thirty. I need five or six minutes. I'll be there in two or three days.",
+    "settings": { "format_numbers": true },
+    "output": "Meet at three thirty. I need five or six minutes. I'll be there in two or three days."
+  },
+  {
+    "input": "It was twenty twenty dollars.",
+    "settings": { "format_numbers": true },
+    "output": "It was twenty twenty dollars."
+  },
+  {
+    "input": "a hundred and twenty days",
+    "settings": { "format_numbers": true },
+    "output": "120 days"
+  },
+  {
+    "input": "email pete@example.com it costs twenty five dollars",
+    "settings": { "format_numbers": true },
+    "output": "email pete@example.com it costs $25"
+  },
+  {
+    "input": "run `ls` then pay twenty five dollars",
+    "settings": { "format_numbers": true },
+    "output": "run `ls` then pay $25"
+  },
+  {
+    "input": "run `ls` We need red. I mean, blue.",
+    "settings": { "remove_restarts": true },
+    "output": "run `ls` Blue."
+  },
+  {
+    "input": "call five five five one two one two, the code is 7 7 3, bye bye",
+    "settings": { "remove_repetitions": true },
+    "output": "call five five five one two one two, the code is 7 7 3, bye bye"
+  },
+  {
+    "input": "call nine one one, the code is 7 7 3, bye bye",
+    "settings": { "remove_restarts": true },
+    "output": "call nine one one, the code is 7 7 3, bye bye"
+  },
+  {
+    "input": "I write C# code, take vitamin c daily",
+    "settings": { "prompt": "C#", "fuzzy_vocabulary": true },
+    "output": "I write C# code, take vitamin c daily"
+  },
+  {
+    "input": "I write C++ code and plan c",
+    "settings": { "prompt": "C++", "fuzzy_vocabulary": true },
+    "output": "I write C++ code and plan c"
+  },
+  {
+    "input": "the net is down",
+    "settings": { "prompt": ".NET", "fuzzy_vocabulary": true },
+    "output": "the net is down"
+  },
+  {
+    "input": "we use .NET , not Java .",
+    "settings": { "prompt": ".NET" },
+    "output": "we use .NET, not Java."
+  },
+  {
+    "input": "we use .NET and the net",
+    "settings": { "prompt": ".NET", "fuzzy_vocabulary": true },
+    "output": "we use .NET and the net"
+  },
+  {
+    "input": "Main Rd and R and D",
+    "settings": { "prompt": "R&D", "fuzzy_vocabulary": true },
+    "output": "Main Rd and R&D"
+  },
+  {
+    "input": "it costs twenty um five dollars",
+    "settings": { "format_numbers": true },
+    "output": "it costs $25"
+  },
+  {
+    "input": "twenty, um, five dollars",
+    "settings": { "format_numbers": true },
+    "output": "$25"
+  },
+  {
+    "input": "uh huh, sure",
+    "settings": { "corrections": "uh huh => yes", "format_numbers": true },
+    "output": "yes, sure"
+  },
+  {
+    "input": "lınux rocks",
+    "settings": { "prompt": "Linux" },
+    "output": "lınux rocks"
+  },
+  {
+    "input": "say hı now",
+    "settings": { "corrections": "hi => hello" },
+    "output": "say hı now"
   }
 ]

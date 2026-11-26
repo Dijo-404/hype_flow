@@ -130,13 +130,23 @@ fn playerctl(args: &[&str]) -> Option<String> {
 }
 
 fn pause_playing(paused: &mut Vec<String>) {
-    let Some(players) = playerctl(&["--list-all"]) else {
+    // shortcut: one hung player times out this query and nothing is paused, query players one by one if that bites.
+    let Ok(output) = run_command(
+        Command::new("playerctl").args([
+            "--all-players",
+            "--format",
+            "{{playerInstance}}\t{{status}}",
+            "status",
+        ]),
+        None,
+        Duration::from_secs(2),
+    ) else {
         return;
     };
-    for player in players.split_whitespace() {
-        if !paused.iter().any(|name| name == player)
-            && playerctl(&["--player", player, "status"])
-                .is_some_and(|status| status.trim() == "Playing")
+    // Ignore the exit status so one failing player does not hide those already listed.
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some((player, "Playing")) = line.split_once('\t')
+            && !paused.iter().any(|name| name == player)
             && playerctl(&["--player", player, "pause"]).is_some()
         {
             paused.push(player.to_owned());

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate release installation, desktop quoting and rollback in temporary roots."""
+"""Validate release installation and desktop quoting in temporary roots."""
 
 import os
 import subprocess
@@ -29,7 +29,6 @@ with tempfile.TemporaryDirectory(prefix="hype-flow-install-") as temporary:
     desktop.write_text(
         "[Desktop Entry]\nType=Application\nName=Previous\nExec=/bin/true\n"
     )
-    previous_desktop = desktop.read_bytes()
     environment = {
         **os.environ,
         "HYPE_FLOW_PREFIX": str(prefix),
@@ -92,12 +91,5 @@ with tempfile.TemporaryDirectory(prefix="hype-flow-install-") as temporary:
     while not marker.exists() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert marker.read_text() == str(launcher), desktop.read_text()
-    rollback = data / "hype-flow/rollback"
-    assert (rollback / "hype-flow").read_bytes() == original
-    assert (rollback / "dev.hype.Flow.desktop").read_bytes() == previous_desktop
-    assert not (data / "hype-flow/config.toml").exists()
-    launcher.write_bytes((rollback / "hype-flow").read_bytes())
-    assert subprocess.check_output([str(launcher)]) == b"previous launcher"
-    print(
-        "Installation, absolute desktop path, private library, idempotence and rollback passed"
-    )
+    assert not (data / "hype-flow").exists()
+    print("Installation, absolute desktop path, private library and idempotence passed")

@@ -135,7 +135,7 @@ fn exercise_services(root: &Path) {
         &bin.join("niri"),
         r#"case "$1:$2:$3" in
         msg:--json:focused-window)
-            if [ -f "$HOME/new-selection" ]; then mv "$HOME/new-selection" "$HOME/clipboard"; fi
+            printf 'niri\n' >> "$HOME/spawned"
             cat "$HOME/focus" ;;
         msg:action:focus-window)
             [ ! -f "$HOME/closed" ] || exit 1
@@ -152,11 +152,14 @@ fn exercise_services(root: &Path) {
     );
     executable(
         &bin.join("wl-paste"),
-        r#"selection_file="$HOME/clipboard"
+        r#"printf 'wl-paste\n' >> "$HOME/spawned"
+        selection_file="$HOME/clipboard"
         if [ "$1" = --primary ]; then selection_file="$HOME/primary"; shift; fi
         if [ ! -f "$selection_file" ]; then echo 'Nothing is copied' >&2; exit 1; fi
         case "$*" in
-        --list-types) printf 'image/png\ntext/plain;charset=utf-8\n' ;;
+        --list-types)
+            if [ -f "$HOME/unreadable" ]; then echo 'clipboard owner hung' >&2; exit 1; fi
+            printf 'image/png\ntext/plain;charset=utf-8\n' ;;
         '--no-newline --type text'|'--no-newline --type text/plain;charset=utf-8') cat "$selection_file" ;;
         *) exit 2 ;;
         esac"#,
@@ -173,6 +176,7 @@ fn exercise_services(root: &Path) {
         --clear) rm -f "$selection_file" ;;
         '--type text/plain;charset=utf-8')
             cat > "$selection_file"
+            if [ -f "$HOME/new-selection" ]; then mv "$HOME/new-selection" "$selection_file"; fi
             if [ -f "$HOME/held-stderr" ]; then
                 (while [ -f "$HOME/held-stderr" ]; do sleep 0.02; done) </dev/null >/dev/null &
             fi ;;
@@ -207,11 +211,35 @@ fn exercise_services(root: &Path) {
     output::deliver("second rapid paste", Some(&firefox), true, false, false).unwrap();
     output::finish_pending();
     assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
+    fs::remove_file(root.join("spawned")).unwrap();
+    output::deliver("checked once", Some(&firefox), true, false, false).unwrap();
+    // Save the clipboard, confirm it still holds the transcript, then check focus once.
+    assert_eq!(
+        fs::read_to_string(root.join("spawned")).unwrap(),
+        "wl-paste\nwl-paste\nwl-paste\nniri\n"
+    );
+    output::finish_pending();
+    assert_eq!(fs::read_to_string(&clipboard).unwrap(), "previous");
+    fs::write(root.join("unreadable"), []).unwrap();
+    assert_eq!(
+        output::deliver("unsaved", Some(&firefox), true, false, false).unwrap(),
+        "Pasted · clipboard not restored"
+    );
+    fs::remove_file(root.join("unreadable")).unwrap();
+    output::finish_pending();
+    assert_eq!(fs::read_to_string(&clipboard).unwrap(), "unsaved");
+    fs::write(&clipboard, "previous").unwrap();
 
     let code = json!({"id": 1, "app_id": "com.microsoft.VSCode"});
     let primary = root.join("primary");
     fs::write(&primary, "previous primary").unwrap();
+    fs::remove_file(root.join("spawned")).unwrap();
     output::deliver("Codex webview text", Some(&code), true, false, false).unwrap();
+    // Save both selections, check them after setting primary, then check focus once.
+    assert_eq!(
+        fs::read_to_string(root.join("spawned")).unwrap(),
+        format!("{}niri\n", "wl-paste\n".repeat(6))
+    );
     assert_eq!(fs::read_to_string(&primary).unwrap(), "Codex webview text");
     assert!(
         fs::read_to_string(&typing)
@@ -351,6 +379,18 @@ fn exercise_services(root: &Path) {
         fs::read_to_string(root.join("primary")).unwrap(),
         "recover this"
     );
+    fs::write(root.join("new-selection"), "newer clipboard item").unwrap();
+    assert_eq!(
+        output::deliver("keep Code text", Some(&code), true, false, false).unwrap(),
+        "Copied · clipboard changed"
+    );
+    output::finish_pending();
+    assert!(!typing.exists());
+    assert_eq!(
+        fs::read_to_string(&clipboard).unwrap(),
+        "newer clipboard item"
+    );
+    assert_eq!(fs::read_to_string(&primary).unwrap(), "keep Code text");
     let held_stderr = root.join("held-stderr");
     fs::write(&held_stderr, []).unwrap();
     let copied = output::copy_text("daemon selection", false);
@@ -439,12 +479,15 @@ fn exercise_services(root: &Path) {
             .count(),
         1
     );
-    assert!(fs::read_dir(&niri).unwrap().flatten().any(|entry| {
-        entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("config.kdl.hype-flow-backup-")
-    }));
+    let backups = |prefix: &str| {
+        fs::read_dir(&niri)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+            .count()
+    };
+    // The rejected save and the first install changed config.kdl; the second install did not.
+    assert_eq!(backups("config.kdl.hype-flow-backup-"), 2);
 
     let mut values = Config {
         dictation_shortcut: "Mod+Ctrl+Space".into(),
@@ -488,8 +531,10 @@ fn exercise_services(root: &Path) {
             .file_name()
             .to_string_lossy()
             .starts_with("hype-flow.kdl.hype-flow-backup-")
-            && fs::read_to_string(entry.path()).is_ok_and(|text| text == original_bindings)
+            && fs::read_to_string(entry.path()).is_ok_and(|text| text == held)
     }));
+    assert_eq!(backups("hype-flow.kdl.hype-flow-backup-"), 3);
+    assert_eq!(backups("config.kdl.hype-flow-backup-"), 2);
     fs::write(
         niri.join("keys.kdl"),
         "binds { Alt+F9 { spawn \"test\"; }; }\n",
@@ -505,13 +550,25 @@ fn exercise_services(root: &Path) {
     );
     assert_eq!(fs::read(&preferences).unwrap(), saved_preferences);
     assert_eq!(fs::read_to_string(&bindings).unwrap(), installed);
+    let dotfile = root.join("dotfiles-niri.kdl");
+    fs::rename(&config, &dotfile).unwrap();
+    std::os::unix::fs::symlink(&dotfile, &config).unwrap();
+    shortcuts::install().unwrap();
+    assert!(fs::symlink_metadata(&config).unwrap().is_symlink());
+    fs::write(&dotfile, &original_config).unwrap();
+    let error = shortcuts::install().unwrap_err().to_string();
+    assert!(
+        error.contains(&format!("include \"{}\"", bindings.display())),
+        "{error}"
+    );
+    assert!(fs::symlink_metadata(&config).unwrap().is_symlink());
+    assert_eq!(fs::read_to_string(&dotfile).unwrap(), original_config);
 
     executable(
         &bin.join("playerctl"),
         r#"case "$*" in
-        --list-all) printf 'playing\nresting\nfailed\n' ;;
-        '--player playing status'|'--player failed status') printf 'Playing\n' ;;
-        '--player resting status') printf 'Paused\n' ;;
+        "--all-players --format {{playerInstance}}$(printf '\t'){{status}} status")
+            printf 'playing\tPlaying\nresting\tPaused\nfailed\tPlaying\n' ;;
         '--player failed pause') exit 1 ;;
         '--player playing play') sleep 0.1; printf '%s\n' "$*" >> "$HOME/player-actions" ;;
         *) printf '%s\n' "$*" >> "$HOME/player-actions" ;;
@@ -553,15 +610,15 @@ fn cached_worker_version_and_audio_assets_are_required() {
         ..Config::default()
     };
     for name in setup::MODEL_FILES.iter().copied().chain(["bpe.vocab"]) {
-        fs::write(model.join(name), []).unwrap();
+        fs::write(model.join(name), b"0").unwrap();
     }
     executable(&worker, "exit 0");
     let version = worker.with_file_name("recognizer.version");
     fs::write(&version, format!("{}\n", setup::NATIVE_VERSION)).unwrap();
     assert!(!setup::assets_ready(&values));
-    fs::write(model.parent().unwrap().join("silero_vad.onnx"), []).unwrap();
+    fs::write(model.parent().unwrap().join("silero_vad.onnx"), b"0").unwrap();
     assert!(!setup::assets_ready(&values));
-    fs::write(model.parent().unwrap().join("gtcrn_simple.onnx"), []).unwrap();
+    fs::write(model.parent().unwrap().join("gtcrn_simple.onnx"), b"0").unwrap();
     fs::write(&version, "3\n").unwrap();
     assert!(!setup::assets_ready(&values));
     fs::write(&version, format!("{}\n", setup::NATIVE_VERSION)).unwrap();

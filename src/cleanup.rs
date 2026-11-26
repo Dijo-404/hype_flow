@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use anyhow::{Context, Result, ensure};
 use fancy_regex::Regex as FancyRegex;
@@ -12,7 +12,6 @@ use crate::vocabulary::{
 
 static COMMON_WORDS: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| include_str!("../assets/common_words.txt").lines().collect());
-const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so"];
 
 pub const DEFAULT_FILTERS: &str = "um, uh, erm, umm, uhh";
 
@@ -43,7 +42,9 @@ static HORIZONTAL_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t]+
 static NOISE_TAGS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)<unk>|\[(?:blank_audio|silence|noise|music|inaudible|applause)\]").unwrap()
 });
-static PUNCTUATION_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" +([,.;:!?])").unwrap());
+// A full stop that starts a word (".NET", ".env") keeps the space before it.
+static PUNCTUATION_SPACES: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r" +([,;:!?]|\.(?![\p{L}\p{N}]))").unwrap());
 
 pub(crate) fn corrections(value: &str) -> Result<Vec<(String, String)>> {
     ensure!(
@@ -127,33 +128,31 @@ fn edit_matches(
     Ok(result)
 }
 
-struct Replacements<'a> {
+struct Replacements {
     pattern: FancyRegex,
-    values: HashMap<&'a str, &'a str>,
+    values: HashMap<String, String>,
 }
 
-impl<'a> Replacements<'a> {
-    fn new(pairs: &'a [(String, String)]) -> Result<Option<Self>> {
+impl Replacements {
+    fn new(pairs: &[(String, String)]) -> Result<Option<Self>> {
         let Some(pattern) = pattern(pairs.iter().map(|(key, _)| key.as_str())) else {
             return Ok(None);
         };
         Ok(Some(Self {
             pattern: FancyRegex::new(&pattern)?,
-            values: pairs
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str()))
-                .collect(),
+            values: pairs.iter().cloned().collect(),
         }))
     }
 
     fn apply(&self, text: &str) -> Result<String> {
         edit_matches(text, &self.pattern, |matched, output| {
             let key = casefold(&normalize_spaces(matched));
-            let replacement = self
-                .values
-                .get(key.as_str())
-                .with_context(|| format!("No correction for {matched:?} after case folding"))?;
-            output.push_str(replacement);
+            // The pattern also lets "i" match "ı", which case folding keeps apart.
+            output.push_str(
+                self.values
+                    .get(key.as_str())
+                    .map_or(matched, String::as_str),
+            );
             Ok(())
         })
     }
@@ -230,11 +229,16 @@ struct FuzzyKey<'a> {
 fn fuzzy_keys(vocabulary: &[(String, String)]) -> Vec<FuzzyKey<'_>> {
     let mut keys = Vec::new();
     for (_, word) in vocabulary {
+        // A key drops edge symbols, so "C#" would claim every "c"; exact matching covers these.
+        if edges(word) != ("", "") {
+            continue;
+        }
         let first = key(word);
         let expanded = key(&word.replace('&', " and "));
         let alternate = (expanded != first).then_some(expanded);
         for value in [Some(first), alternate].into_iter().flatten() {
-            if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            // Very short keys ("rd" from R&D) are ordinary words.
+            if value.len() >= 3 && value.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
                 keys.push(FuzzyKey {
                     sound: value
                         .bytes()
@@ -414,7 +418,7 @@ fn remove_repetitions(text: &str) -> Result<String> {
         let captures = captures?;
         let repetition = captures.get(0).unwrap();
         let first_word = captures.get(1).unwrap();
-        if LEGITIMATE_DOUBLES.contains(&first_word.as_str()) {
+        if crate::restarts::legitimate_double(first_word.as_str()) {
             continue;
         }
         output.push_str(&text[end..offsets[repetition.start()]]);
@@ -436,7 +440,7 @@ fn vocabulary_echo(text: &str, vocabulary: &[(String, String)]) -> bool {
     }
     if vocabulary.iter().any(|(_, term)| {
         let term = key(term);
-        !LEGITIMATE_DOUBLES.contains(&term.as_str())
+        !crate::restarts::legitimate_double(&term)
             && words.iter().filter(|word| **word == term).count() >= 3
             && words.iter().filter(|word| **word == term).count() * 4 >= words.len() * 3
     }) {
@@ -457,6 +461,64 @@ fn vocabulary_echo(text: &str, vocabulary: &[(String, String)]) -> bool {
         }
     }
     matched >= 3 && covered * 4 >= words.len() * 3
+}
+
+/// Patterns built from the settings' word lists.
+struct Compiled {
+    blocked: Vec<String>,
+    vocabulary_rules: Option<Replacements>,
+    replacements: Option<Replacements>,
+    filters: Option<FancyRegex>,
+}
+
+type CompiledKey = (String, String, String, bool, bool);
+
+/// Long word lists take tens of milliseconds to compile, so reuse the last
+/// build until a setting it depends on changes.
+fn compiled(values: &Config, vocabulary: &[(String, String)]) -> Result<Arc<Compiled>> {
+    static CACHE: Mutex<Option<(CompiledKey, Arc<Compiled>)>> = Mutex::new(None);
+    let key = (
+        values.prompt.clone(),
+        values.corrections.clone(),
+        values.blocked_words.clone(),
+        values.auto_correct,
+        values.filter_words,
+    );
+    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((cached, compiled)) = &*cache
+        && *cached == key
+    {
+        return Ok(compiled.clone());
+    }
+    let rules = corrections(&values.corrections)?;
+    let blocked = terms(&values.blocked_words)?;
+    let vocabulary_rules = values
+        .auto_correct
+        .then(|| Replacements::new(vocabulary))
+        .transpose()?
+        .flatten();
+    let replacements = values
+        .auto_correct
+        .then(|| Replacements::new(&rules))
+        .transpose()?
+        .flatten();
+    let filters = if values.filter_words
+        && let Some(pattern) = pattern(blocked.iter().map(String::as_str))
+    {
+        Some(FancyRegex::new(&format!(
+            r"(?:,{SPACE}*)?{pattern}(?:{SPACE}*[,;:])?"
+        ))?)
+    } else {
+        None
+    };
+    let compiled = Arc::new(Compiled {
+        blocked,
+        vocabulary_rules,
+        replacements,
+        filters,
+    });
+    *cache = Some((key, compiled.clone()));
+    Ok(compiled)
 }
 
 pub fn process(text: &str, values: &Config) -> Result<String> {
@@ -507,37 +569,67 @@ pub fn process_with_confidence(
     {
         return Ok(String::new());
     }
-    let rules = corrections(&values.corrections)?;
-    let blocked = terms(&values.blocked_words)?;
-    let vocabulary_rules = values
-        .auto_correct
-        .then(|| Replacements::new(&vocabulary))
-        .transpose()?
-        .flatten();
-    let replacements = values
-        .auto_correct
-        .then(|| Replacements::new(&rules))
-        .transpose()?
-        .flatten();
+    let compiled = compiled(values, &vocabulary)?;
+    let Compiled {
+        blocked,
+        vocabulary_rules,
+        replacements,
+        filters,
+    } = &*compiled;
     let fuzzy = values.fuzzy_vocabulary.then(|| fuzzy_keys(&vocabulary));
-    let filters = if values.filter_words
-        && let Some(pattern) = pattern(blocked.iter().map(String::as_str))
-    {
-        Some(FancyRegex::new(&format!(
-            r"(?:,{SPACE}*)?{pattern}(?:{SPACE}*[,;:])?"
-        ))?)
-    } else {
-        None
+    let preserve = |matched: &str| {
+        let word = matched.trim_matches([' ', ',', ';', ':']);
+        let mut uppercase = false;
+        word.chars().all(|character| {
+            uppercase |= character.is_uppercase();
+            !character.is_lowercase() && !matches_char(&TITLECASE, character)
+        }) && uppercase
+            && word.chars().count() > 1
+            && !blocked.iter().any(|item| item == word)
     };
     let mut removed = false;
-    let mut plain = |mut text: String| -> Result<String> {
-        text = NOISE_TAGS.replace_all(&text, " ").into_owned();
+    let mut plain = |segment: &str| -> Result<String> {
+        // Stages that rebuild text from words drop the spaces joining it to a protected span.
+        let body = segment.trim_matches(whitespace);
+        let start = segment.len() - segment.trim_start_matches(whitespace).len();
+        let mut text = NOISE_TAGS.replace_all(body, " ").into_owned();
         if values.remove_restarts {
             text = crate::restarts::collapse_restarts(&text);
         }
         // Resolve spoken punctuation before number grammars can consume its words.
         if values.spoken_commands {
             text = crate::text_processing::spoken_punctuation(&text);
+        }
+        // Drop a filler between number words first, or "twenty um five" reads as two
+        // numbers. Other fillers wait, so corrections such as "uh huh => yes" still match.
+        if values.format_numbers
+            && let Some(filters) = &filters
+        {
+            let number = |word: Option<&str>| {
+                word.is_some_and(|word| {
+                    crate::itn::number_words().contains(
+                        word.trim_matches(|character: char| !character.is_alphanumeric())
+                            .to_lowercase()
+                            .as_str(),
+                    )
+                })
+            };
+            let mut kept = String::with_capacity(text.len());
+            let mut end = 0;
+            for matched in filters.find_iter(&text) {
+                let matched = matched?;
+                if number(text[..matched.start()].split_whitespace().next_back())
+                    && number(text[matched.end()..].split_whitespace().next())
+                    && !preserve(matched.as_str())
+                {
+                    kept.push_str(&text[end..matched.start()]);
+                    kept.push(' ');
+                    end = matched.end();
+                    removed = true;
+                }
+            }
+            kept.push_str(&text[end..]);
+            text = kept;
         }
         if values.format_numbers {
             text = crate::itn::apply(&text);
@@ -563,15 +655,7 @@ pub fn process_with_confidence(
         }
         if let Some(filters) = &filters {
             text = edit_matches(&text, filters, |matched, output| {
-                let word = matched.trim_matches([' ', ',', ';', ':']);
-                let mut uppercase = false;
-                let preserve = word.chars().all(|character| {
-                    uppercase |= character.is_uppercase();
-                    !character.is_lowercase() && !matches_char(&TITLECASE, character)
-                }) && uppercase
-                    && word.chars().count() > 1
-                    && !blocked.iter().any(|item| item == word);
-                if preserve {
+                if preserve(matched) {
                     output.push_str(matched);
                 } else {
                     removed = true;
@@ -583,19 +667,26 @@ pub fn process_with_confidence(
         if values.remove_repetitions {
             text = remove_repetitions(&text)?;
         }
+        let text = format!(
+            "{}{text}{}",
+            &segment[..start],
+            &segment[start + body.len()..]
+        );
         let text = HORIZONTAL_SPACES.replace_all(&text, " ");
-        Ok(PUNCTUATION_SPACES.replace_all(&text, "$1").into_owned())
+        Ok(PUNCTUATION_SPACES
+            .try_replacen(&text, 0, "$1")?
+            .into_owned())
     };
 
     let mut result = String::with_capacity(text.len());
     let mut end = 0;
     for protected in PROTECTED.find_iter(text) {
         let protected = protected?;
-        result.push_str(&plain(text[end..protected.start()].to_owned())?);
+        result.push_str(&plain(&text[end..protected.start()])?);
         result.push_str(protected.as_str());
         end = protected.end();
     }
-    result.push_str(&plain(text[end..].to_owned())?);
+    result.push_str(&plain(&text[end..])?);
     let result = result.trim_matches(whitespace);
     let result = match result.strip_prefix([',', ';', ':']) {
         Some(rest) => rest.trim_start_matches(whitespace),
@@ -663,6 +754,25 @@ mod product_tests {
             process("One of the things. No one knows.", &values).unwrap(),
             "One of the things. No one knows."
         );
+    }
+    #[test]
+    fn compiled_patterns_follow_settings_changes() {
+        let mut values = Config {
+            corrections: "foo => bar".into(),
+            ..Config::default()
+        };
+        assert_eq!(process("foo um", &values).unwrap(), "bar");
+        // One key field per step, so a field missing from the key fails its own step.
+        values.corrections = "foo => baz".into();
+        assert_eq!(process("foo um", &values).unwrap(), "baz");
+        values.blocked_words = "baz".into();
+        assert_eq!(process("foo um", &values).unwrap(), "um");
+        values.filter_words = false;
+        assert_eq!(process("foo um", &values).unwrap(), "baz um");
+        values.prompt = "Kubernetes".into();
+        assert_eq!(process("kubernetes", &values).unwrap(), "Kubernetes");
+        values.auto_correct = false;
+        assert_eq!(process("kubernetes", &values).unwrap(), "kubernetes");
     }
     #[test]
     fn confidence_only_permits_low_confidence_unambiguous_words() {

@@ -48,7 +48,6 @@ const TERMINALS: &[&str] = &[
 ];
 const RESTORE_DELAY: Duration = Duration::from_millis(800);
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(3);
-const CLIPBOARD_LIMIT: usize = 32 * 1024 * 1024;
 const TEXT_MIME: &str = "text/plain;charset=utf-8";
 struct Selection {
     generation: u64,
@@ -188,7 +187,7 @@ fn read_selection(kind: &str, primary: bool) -> Option<Vec<u8>> {
         CLIPBOARD_TIMEOUT,
     )
     .ok()?;
-    (output.status.success() && output.stdout.len() <= CLIPBOARD_LIMIT).then_some(output.stdout)
+    output.status.success().then_some(output.stdout)
 }
 
 fn previous_selection(primary: bool) -> Option<Clipboard> {
@@ -399,14 +398,19 @@ fn wait_release(
     }
 }
 
-fn wait_for_modifiers(enabled: bool, cancelled: &impl Fn() -> bool) -> Result<()> {
+fn wait_for_modifiers(
+    enabled: bool,
+    stopped: Instant,
+    cancelled: &impl Fn() -> bool,
+) -> Result<()> {
     let keyboards = enabled.then(keyboard_devices).flatten();
     wait_release(
         || keyboards.as_deref().and_then(modifiers_down),
         cancelled,
         Duration::from_millis(50),
         Duration::from_millis(1500),
-        Duration::from_millis(180),
+        // The shortcut was pressed before decoding, so its keys have had that time to lift.
+        Duration::from_millis(180).saturating_sub(stopped.elapsed()),
     )
 }
 
@@ -435,10 +439,12 @@ pub fn deliver_until(
         trailing_space,
         press_enter,
         false,
+        Instant::now(),
         cancelled,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn deliver_guarded_until(
     text: &str,
     target: Option<&Value>,
@@ -446,6 +452,7 @@ pub fn deliver_guarded_until(
     trailing_space: bool,
     press_enter: bool,
     modifier_release_guard: bool,
+    stopped: Instant,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
     ensure!(!cancelled(), "Clipboard delivery cancelled");
@@ -461,36 +468,36 @@ pub fn deliver_guarded_until(
         return Ok("Copied".to_owned());
     }
     // The compositor must release the shortcut modifiers before synthesized keys.
-    wait_for_modifiers(modifier_release_guard, &cancelled)?;
+    wait_for_modifiers(modifier_release_guard, stopped, &cancelled)?;
     ensure!(!cancelled(), "Clipboard delivery cancelled");
     let id = target.and_then(window_id);
-    if !id.is_some_and(|id| same_focus(id) || refocus(id)) {
-        copy_text(&transcript, true)?;
-        return Ok("Copied · focus changed".to_owned());
-    }
-    if !still_selected(&transcript, false) {
-        copy_text(&transcript, true)?;
-        return Ok("Copied · clipboard changed".to_owned());
-    }
-    if !id.is_some_and(same_focus) {
-        copy_text(&transcript, true)?;
-        return Ok("Copied · focus changed".to_owned());
-    }
-    ensure!(!cancelled(), "Clipboard delivery cancelled");
+    // Check selections, then focus once before typing; Shift+Insert checks after setting primary.
+    let focused = || id.is_some_and(|id| same_focus(id) || refocus(id));
     let app_id = target
         .and_then(|window| window.get("app_id"))
         .and_then(Value::as_str)
         .unwrap_or_default();
     let terminal = is_terminal(app_id);
-    if use_shift_insert(app_id) {
+    let shift_insert = use_shift_insert(app_id);
+    if !shift_insert && !still_selected(&transcript, false) {
+        copy_text(&transcript, true)?;
+        return Ok("Copied · clipboard changed".to_owned());
+    }
+    if !shift_insert && !focused() {
+        copy_text(&transcript, true)?;
+        return Ok("Copied · focus changed".to_owned());
+    }
+    ensure!(!cancelled(), "Clipboard delivery cancelled");
+    if shift_insert {
         let mut primary = PRIMARY.lock().unwrap_or_else(|error| error.into_inner());
         let previous_primary = replace_selection(&transcript, true, true, &mut primary)?;
+        // Skip the primary restore so the transcript stays recoverable there.
+        if !still_selected(&transcript, false) {
+            return Ok("Copied · clipboard changed".to_owned());
+        }
         let pasted: Result<bool> = (|| {
             ensure!(!cancelled(), "Clipboard delivery cancelled");
-            if !still_selected(&transcript, true)
-                || !still_selected(&transcript, false)
-                || !id.is_some_and(same_focus)
-            {
+            if !still_selected(&transcript, true) || !focused() {
                 return Ok(false);
             }
             type_keys(&["-M", "shift", "-k", "Insert", "-m", "shift"], &cancelled)?;
@@ -513,6 +520,8 @@ pub fn deliver_guarded_until(
             &cancelled,
         )?;
     }
+    // The original clipboard could not be read, so the transcript replaces it.
+    let unsaved = previous.is_none();
     restore_after_paste(previous, transcript, &mut selection, false);
     let submitted = if press_enter && !terminal {
         thread::sleep(Duration::from_millis(50));
@@ -525,12 +534,16 @@ pub fn deliver_guarded_until(
     } else {
         false
     };
-    Ok(if submitted {
+    let message = if submitted {
         "Pasted and sent"
     } else {
         "Pasted"
-    }
-    .to_owned())
+    };
+    Ok(if unsaved {
+        format!("{message} · clipboard not restored")
+    } else {
+        message.to_owned()
+    })
 }
 
 #[cfg(test)]
@@ -570,5 +583,13 @@ mod modifier_tests {
         )
         .unwrap();
         assert!(started.elapsed() >= fallback);
+    }
+
+    #[test]
+    fn fallback_wait_counts_from_the_stop_shortcut() {
+        let started = Instant::now();
+        let stopped = started.checked_sub(Duration::from_secs(1)).unwrap();
+        wait_for_modifiers(false, stopped, &|| false).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(180));
     }
 }

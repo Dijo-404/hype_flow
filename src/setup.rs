@@ -12,7 +12,7 @@ use std::{
     ffi::{CString, OsStr},
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
-    os::unix::{ffi::OsStrExt, fs::OpenOptionsExt},
+    os::unix::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawFd},
     path::{Component, Path, PathBuf},
     process::Command,
     time::{Duration, Instant},
@@ -108,7 +108,7 @@ pub fn model_files(model: &Path) -> &'static [&'static str] {
     }
 }
 
-pub const NATIVE_VERSION: &str = "8";
+pub const NATIVE_VERSION: &str = "9";
 const TOKENIZER_REVISION: &str = "7a16ff98b72e5b0beba6f182a5357c704d977b15";
 const TOKENIZER_SHA256: &str = "07d4e5a63840a53ab2d4d106d2874768143fb3fbdd47938b3910d2da05bfb0a9";
 const AUDIO_MODELS: &[(&str, &str, &str)] = &[
@@ -127,22 +127,24 @@ const AUDIO_MODELS: &[(&str, &str, &str)] = &[
 pub fn assets_ready(values: &Config) -> bool {
     let model = Path::new(&values.model);
     let server = Path::new(&values.server);
-    let ctc = variant_for_path(model) == "parakeet-ctc";
     server.is_file()
-        && fs::read_to_string(server.with_file_name("recognizer.version")).is_ok_and(|version| {
-            let version = version.trim();
-            version == NATIVE_VERSION || !ctc && matches!(version, "6" | "7")
-        })
+        && fs::read_to_string(server.with_file_name("recognizer.version"))
+            .is_ok_and(|version| version.trim() == NATIVE_VERSION)
         && model_files(model)
             .iter()
-            .all(|name| model.join(name).is_file())
+            .all(|name| non_empty(&model.join(name)))
         && (!(values.feature_dim == 128 || values.vocabulary_boosting)
             || model.join("bpe.vocab").is_file())
         && model.parent().is_some_and(|parent| {
             AUDIO_MODELS
                 .iter()
-                .all(|(name, _, _)| parent.join(name).is_file())
+                .all(|(name, _, _)| non_empty(&parent.join(name)))
         })
+}
+
+// An interrupted extraction can leave zero-length files that setup must repair.
+fn non_empty(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
 }
 
 fn checksum(path: &Path) -> Result<String> {
@@ -335,6 +337,24 @@ fn extract_model(archive: &Path, model: &Path, files: &[&str], expected_bytes: u
     Ok(())
 }
 
+// Extraction wrote these exact sizes from a verified archive, so matching sizes avoid rehashing it.
+fn model_installed(model: &Path, specification: &ModelSpec) -> bool {
+    specification
+        .files
+        .iter()
+        .map(|name| {
+            fs::metadata(model.join(name))
+                .ok()
+                .filter(|info| info.is_file())
+                .map(|info| info.len())
+        })
+        .sum::<Option<u64>>()
+        == Some(specification.bytes)
+        && (!specification.boosting
+            || fs::metadata(model.join("bpe.vocab"))
+                .is_ok_and(|info| info.is_file() && info.len() > 0))
+}
+
 fn exists(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
@@ -474,34 +494,51 @@ pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String
         .user_agent("hype-flow-setup/0.1")
         .timeout(Duration::from_secs(60))
         .build()?;
+    install_from(
+        &root,
+        &specification,
+        &shipped_worker,
+        |url, path, expected| download(&client, url, path, expected, &progress),
+        &progress,
+    )
+}
+
+fn install_from(
+    root: &Path,
+    specification: &ModelSpec,
+    shipped_worker: &Path,
+    fetch: impl Fn(&str, &Path, &str) -> Result<()>,
+    progress: &impl Fn(&str),
+) -> Result<(String, String)> {
     let downloads = root.join("downloads");
     let archive = downloads.join(format!("sherpa-onnx-{RELEASE}.tar.bz2"));
-    download(
-        &client,
+    fetch(
         &format!(
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/v{RELEASE}/{RUNTIME_NAME}.tar.bz2"
         ),
         &archive,
         BACKEND_SHA256,
-        &progress,
-    )?;
-    let model_archive = downloads.join(format!("{}.tar.bz2", specification.name));
-    download(
-        &client,
-        &format!(
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}",
-            specification.archive
-        ),
-        &model_archive,
-        specification.sha256,
-        &progress,
     )?;
     let backend = root.join("backend");
     let models = root.join("models");
+    let model_target = models.join(specification.name);
+    // A stale worker or audio model alone must not unpack the speech model again.
+    let reuse_model = model_installed(&model_target, specification);
+    let model_archive = downloads.join(format!("{}.tar.bz2", specification.name));
+    if !reuse_model {
+        fetch(
+            &format!(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}",
+                specification.archive
+            ),
+            &model_archive,
+            specification.sha256,
+        )?;
+    }
     fs::create_dir_all(&backend)?;
     fs::create_dir_all(&models)?;
     for (name, url, expected) in AUDIO_MODELS {
-        download(&client, url, &models.join(name), expected, &progress)?;
+        fetch(url, &models.join(name), expected)?;
     }
 
     let stage = Builder::new().prefix(".parakeet-").tempdir_in(root)?;
@@ -509,31 +546,30 @@ pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String
     let model = stage.path().join("model");
     progress("Installing speech runtime");
     extract_runtime(&archive, &runtime)?;
-    stage_worker(&runtime, &shipped_worker)?;
-    progress(&format!("Installing {}", specification.label));
-    extract_model(
-        &model_archive,
-        &model,
-        specification.files,
-        specification.bytes,
-    )?;
-    if specification.boosting {
-        let tokenizer = downloads.join("parakeet-unified-tokenizer.model");
-        download(
-            &client,
-            &format!(
-                "https://huggingface.co/eschmidbauer/parakeet-unified-en-0.6b-onnx/resolve/{TOKENIZER_REVISION}/onnx_int8/tokenizer.model"
-            ),
-            &tokenizer,
-            TOKENIZER_SHA256,
-            &progress,
+    stage_worker(&runtime, shipped_worker)?;
+    if !reuse_model {
+        progress(&format!("Installing {}", specification.label));
+        extract_model(
+            &model_archive,
+            &model,
+            specification.files,
+            specification.bytes,
         )?;
-        let vocabulary =
-            sentencepiece_vocabulary(&fs::read(tokenizer)?, &model.join("tokens.txt"))?;
-        fs::write(model.join("bpe.vocab"), vocabulary)?;
+        if specification.boosting {
+            let tokenizer = downloads.join("parakeet-unified-tokenizer.model");
+            fetch(
+                &format!(
+                    "https://huggingface.co/eschmidbauer/parakeet-unified-en-0.6b-onnx/resolve/{TOKENIZER_REVISION}/onnx_int8/tokenizer.model"
+                ),
+                &tokenizer,
+                TOKENIZER_SHA256,
+            )?;
+            let vocabulary =
+                sentencepiece_vocabulary(&fs::read(tokenizer)?, &model.join("tokens.txt"))?;
+            fs::write(model.join("bpe.vocab"), vocabulary)?;
+        }
     }
 
-    let model_target = models.join(specification.name);
     let runtime_target = backend.join("parakeet");
     let server_target = runtime_target.join("recognizer");
     let model_path = model_target
@@ -544,7 +580,18 @@ pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String
         .to_str()
         .context("Speech runtime path is not UTF-8")?
         .to_owned();
-    activate(stage, &[(runtime, runtime_target), (model, model_target)])?;
+    let mut targets = vec![(runtime, runtime_target)];
+    if !reuse_model {
+        targets.push((model, model_target));
+    }
+    let staged = File::open(stage.path())?;
+    // Flush staged files first so a power loss cannot leave empty files active.
+    if unsafe { libc::syncfs(staged.as_raw_fd()) } != 0 {
+        return Err(io::Error::last_os_error()).context("Could not flush staged speech files");
+    }
+    activate(stage, &targets)?;
+    // The verified archive is fully extracted; keeping it would double the model's disk use.
+    let _ = fs::remove_file(&model_archive);
     progress("Speech model ready");
     Ok((model_path, server_path))
 }
@@ -555,7 +602,7 @@ mod tests {
     use std::{
         io::{BufRead, BufReader},
         net::TcpListener,
-        os::unix::fs::PermissionsExt,
+        os::unix::fs::{MetadataExt, PermissionsExt},
         thread,
     };
 
@@ -589,8 +636,14 @@ mod tests {
             ..Config::default()
         };
         assert!(assets_ready(&values));
-        fs::write(server.with_file_name("recognizer.version"), "6\n").unwrap();
-        assert!(assets_ready(&values));
+        // Older workers lack revision 9's memory savings, so setup must replace them.
+        fs::write(server.with_file_name("recognizer.version"), "8\n").unwrap();
+        assert!(!assets_ready(&values));
+        fs::write(server.with_file_name("recognizer.version"), NATIVE_VERSION).unwrap();
+        // A zero-length file left by an interrupted extraction is not ready.
+        fs::write(model.join(MODEL_FILES[0]), b"").unwrap();
+        assert!(!assets_ready(&values));
+        fs::write(model.join(MODEL_FILES[0]), b"fixture").unwrap();
         values.vocabulary_boosting = true;
         assert!(!assets_ready(&values));
         fs::write(model.join("bpe.vocab"), b"fixture").unwrap();
@@ -603,7 +656,6 @@ mod tests {
         }
         values.model = model.to_string_lossy().into_owned();
         values.vocabulary_boosting = false;
-        assert!(!assets_ready(&values));
         fs::write(server.with_file_name("recognizer.version"), "7\n").unwrap();
         assert!(!assets_ready(&values));
         fs::write(server.with_file_name("recognizer.version"), NATIVE_VERSION).unwrap();
@@ -629,10 +681,143 @@ mod tests {
                 .unwrap();
         }
         builder.into_inner().unwrap().finish().unwrap();
-        extract_model(&archive, &root.path().join("valid"), MODEL_FILES, 4).unwrap();
-        assert!(!root.path().join("valid/bpe.vocab").exists());
+        let valid = root.path().join("valid");
+        extract_model(&archive, &valid, MODEL_FILES, 4).unwrap();
+        assert!(!valid.join("bpe.vocab").exists());
+        // A reinstall for a stale worker reuses an intact model instead of unpacking it again.
+        let mut installed = ModelSpec {
+            bytes: 4,
+            ..model_spec("low-memory").unwrap()
+        };
+        assert!(model_installed(&valid, &installed));
+        installed.boosting = true;
+        assert!(!model_installed(&valid, &installed));
+        fs::write(valid.join("bpe.vocab"), b"").unwrap();
+        assert!(!model_installed(&valid, &installed));
+        fs::write(valid.join("bpe.vocab"), b"fixture").unwrap();
+        assert!(model_installed(&valid, &installed));
+        installed.boosting = false;
+        fs::write(valid.join("tokens.txt"), b"").unwrap();
+        assert!(!model_installed(&valid, &installed));
         assert!(extract_model(&archive, &root.path().join("too-small"), MODEL_FILES, 3).is_err());
         assert!(extract_model(&archive, &root.path().join("too-large"), MODEL_FILES, 5).is_err());
+    }
+
+    #[test]
+    fn runtime_archive_rejects_parent_directory_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("runtime.tar.bz2");
+        let compressed = bzip2::write::BzEncoder::new(
+            File::create(&archive).unwrap(),
+            bzip2::Compression::default(),
+        );
+        let mut builder = tar::Builder::new(compressed);
+        let mut header = tar::Header::new_gnu();
+        // Header::set_path refuses "..", so write the raw name a hostile archive would carry.
+        let name = format!("{RUNTIME_NAME}/lib/../../escaped");
+        header.as_old_mut().name[..name.len()].copy_from_slice(name.as_bytes());
+        header.set_size(1);
+        header.set_mode(0o600);
+        header.set_cksum();
+        builder.append(&header, &b"x"[..]).unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+        let runtime = root.path().join("stage/runtime");
+        let error = extract_runtime(&archive, &runtime).unwrap_err();
+        assert!(error.to_string().contains("Unsafe"), "{error:#}");
+        assert!(!root.path().join("stage/escaped").exists());
+        assert!(!root.path().join("escaped").exists());
+    }
+
+    fn build_probe_worker(source: &Path) {
+        let stub = source.with_file_name("worker_probe.rs");
+        fs::write(&stub, "fn main() { std::process::exit(64); }").unwrap();
+        assert!(
+            Command::new(option_env!("RUSTC").unwrap_or("rustc"))
+                .arg(&stub)
+                .arg("-o")
+                .arg(source)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    #[test]
+    fn stale_runtime_reinstall_keeps_the_installed_model() {
+        let root = tempfile::tempdir().unwrap();
+        let downloads = root.path().join("downloads");
+        fs::create_dir(&downloads).unwrap();
+        let compressed = bzip2::write::BzEncoder::new(
+            File::create(downloads.join(format!("sherpa-onnx-{RELEASE}.tar.bz2"))).unwrap(),
+            bzip2::Compression::default(),
+        );
+        let mut builder = tar::Builder::new(compressed);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(1);
+        header.set_mode(0o600);
+        header.set_cksum();
+        builder
+            .append_data(
+                &mut header,
+                format!("{RUNTIME_NAME}/lib/libfixture.so"),
+                &b"x"[..],
+            )
+            .unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+        let specification = ModelSpec {
+            bytes: 4,
+            ..model_spec("low-memory").unwrap()
+        };
+        let model = root.path().join("models").join(specification.name);
+        fs::create_dir_all(&model).unwrap();
+        for name in specification.files {
+            fs::write(model.join(name), b"x").unwrap();
+        }
+        let model_archive = downloads.join(format!("{}.tar.bz2", specification.name));
+        fs::write(&model_archive, b"cached").unwrap();
+        let runtime = root.path().join("backend/parakeet");
+        fs::create_dir_all(&runtime).unwrap();
+        fs::write(runtime.join("recognizer.version"), "6\n").unwrap();
+        let worker = root.path().join("shipped-worker");
+        build_probe_worker(&worker);
+        let inode = fs::metadata(&model).unwrap().ino();
+        let (model_path, server_path) = install_from(
+            root.path(),
+            &specification,
+            &worker,
+            |url, _, _| {
+                ensure!(
+                    !url.ends_with(specification.archive),
+                    "Model archive fetched again"
+                );
+                Ok(())
+            },
+            &|_| {},
+        )
+        .unwrap();
+        assert_eq!(model_path, model.to_str().unwrap());
+        assert_eq!(server_path, runtime.join("recognizer").to_str().unwrap());
+        assert_eq!(fs::metadata(&model).unwrap().ino(), inode);
+        assert!(
+            !root
+                .path()
+                .join(format!("models/{}.previous", specification.name))
+                .exists()
+        );
+        assert_eq!(
+            fs::read_to_string(
+                root.path()
+                    .join("backend/parakeet.previous/recognizer.version")
+            )
+            .unwrap(),
+            "6\n"
+        );
+        assert_eq!(
+            fs::read_to_string(runtime.join("recognizer.version")).unwrap(),
+            format!("{NATIVE_VERSION}\n")
+        );
+        assert!(runtime.join("lib/libfixture.so").is_file());
+        assert!(!model_archive.exists());
     }
 
     #[test]
@@ -655,17 +840,7 @@ mod tests {
             fs::read(runtime.join("recognizer")).unwrap(),
             b"previous worker"
         );
-        let stub = root.path().join("worker_probe.rs");
-        fs::write(&stub, "fn main() { std::process::exit(64); }").unwrap();
-        assert!(
-            Command::new(option_env!("RUSTC").unwrap_or("rustc"))
-                .arg(&stub)
-                .arg("-o")
-                .arg(&source)
-                .status()
-                .unwrap()
-                .success()
-        );
+        build_probe_worker(&source);
         stage_worker(&runtime, &source).unwrap();
         assert_eq!(
             fs::read(runtime.join("recognizer")).unwrap(),

@@ -229,9 +229,9 @@ fn boosted_denoised_audio_is_windowed_and_overlapping_padding_is_deduplicated() 
     assert_released(
         &output,
         &[
-            "segment",
-            "segment",
             "audio",
+            "segment",
+            "segment",
             "result",
             "stream",
             "vad",
@@ -292,6 +292,48 @@ fn empty_vad_returns_empty_even_when_denoiser_is_incompatible() {
     assert_eq!(frame(&mut stdout), b"{\"text\":\"\"}");
     assert!(stdout.is_empty());
     assert_released(&output, &["audio", "vad", "denoiser", "recognizer"]);
+}
+
+#[test]
+fn long_vad_output_is_split_with_chunk_times_in_source_audio() {
+    let stage = staged_worker();
+    let mut command = worker(&stage);
+    command.env("FAKE_SHERPA_MODE", "multi-piece").args([
+        "model",
+        "2",
+        "--vad",
+        "vad",
+        "--max-piece-seconds",
+        "5",
+    ]);
+    let output = run(command, &pcm(&vec![1000; 128_000]));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut stdout = output.stdout.as_slice();
+    assert_eq!(frame(&mut stdout), READY);
+    let result: serde_json::Value = serde_json::from_slice(&frame(&mut stdout)).unwrap();
+    // 6.85 s of padded speech splits in the silence inserted between VAD ranges.
+    assert_eq!(result["text"], "58400 51200");
+    let chunks = result["chunks"].as_array().unwrap();
+    assert_eq!(chunks.len(), 2);
+    let close = |value: &serde_json::Value, expected: f64| {
+        value
+            .as_f64()
+            .is_some_and(|value| (value - expected).abs() < 1e-9)
+    };
+    for (chunk, (offset, duration, time)) in
+        chunks.iter().zip([(0.55, 4.0, 0.5), (4.55, 3.15, 0.45)])
+    {
+        assert!(close(&chunk["audio_offset_seconds"], offset), "{chunk}");
+        assert!(close(&chunk["audio_duration_seconds"], duration), "{chunk}");
+        // Piece-relative times land on the source speech: 1.05 s and 5.0 s.
+        assert!(close(&chunk["result"]["timestamps"][0], time), "{chunk}");
+        // The app drops chunks that extend past the 8-second request.
+        assert!(offset + duration <= 8.0);
+    }
 }
 
 #[test]
@@ -423,17 +465,21 @@ fn low_memory_model_can_select_eighty_feature_bins() {
 }
 
 #[test]
-fn audible_empty_recognition_retries_exactly_once() {
-    for retry in [false, true] {
+fn audible_empty_recognition_retries_once_only_when_vad_trimmed_audio() {
+    // Without VAD the retry would decode identical audio, so it is skipped.
+    for (vad, retry) in [(true, false), (true, true), (false, true)] {
         let stage = staged_worker();
         let mut command = worker(&stage);
         command
             .env("FAKE_SHERPA_MODE", "empty-first")
-            .args(["model", "2"]);
+            .args(["model", "2", "--denoise", "denoise"]);
+        if vad {
+            command.args(["--vad", "vad"]);
+        }
         if retry {
             command.arg("--soft-speech-retry");
         }
-        let output = run(command, &pcm(&vec![1000; 1600]));
+        let output = run(command, &pcm(&(0..20_000).collect::<Vec<_>>()));
         assert!(
             output.status.success(),
             "{}",
@@ -442,9 +488,10 @@ fn audible_empty_recognition_retries_exactly_once() {
         let mut stdout = output.stdout.as_slice();
         assert_eq!(frame(&mut stdout), READY);
         let result = frame(&mut stdout);
+        let retried = vad && retry;
         assert_eq!(
             result,
-            if retry {
+            if retried {
                 &b"{\"text\":\"recovered\"}"[..]
             } else {
                 &b"{\"text\":\"\"}"[..]
@@ -454,7 +501,7 @@ fn audible_empty_recognition_retries_exactly_once() {
             String::from_utf8_lossy(&output.stderr)
                 .matches("drop stream")
                 .count(),
-            if retry { 2 } else { 1 }
+            if retried { 2 } else { 1 }
         );
     }
 }

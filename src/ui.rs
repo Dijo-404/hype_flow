@@ -1,5 +1,5 @@
 use crate::{audio, config::Config, setup};
-use gtk::{gdk, glib, prelude::*};
+use gtk::{gdk, gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::{
     cell::{Cell, RefCell},
@@ -70,7 +70,6 @@ impl ShortcutCapture {
                 capture.cancel();
             }
         });
-        capture.cancel();
         capture
     }
 
@@ -162,7 +161,7 @@ pub enum Control {
     Entry(gtk::Entry),
     Text(gtk::TextBuffer),
     Number(gtk::SpinButton),
-    Choice(gtk::DropDown, Vec<String>),
+    Choice(gtk::DropDown, RefCell<Vec<String>>),
     Shortcut(Rc<ShortcutCapture>),
 }
 
@@ -181,6 +180,7 @@ impl Control {
             Self::Number(widget) => json!(widget.value()),
             Self::Choice(widget, values) => json!(
                 values
+                    .borrow()
                     .get(widget.selected() as usize)
                     .cloned()
                     .unwrap_or_default()
@@ -245,6 +245,17 @@ fn label(text: &str, class: &str) -> gtk::Label {
         widget.add_css_class(class);
     }
     widget
+}
+
+fn input_choices(sources: Vec<(String, String)>, keep: &[&str]) -> Vec<(String, String)> {
+    let mut choices = vec![("auto".to_string(), "System default".to_string())];
+    choices.extend(sources);
+    for id in keep {
+        if !choices.iter().any(|(key, _)| key == id) {
+            choices.push((id.to_string(), format!("{id} (unavailable)")));
+        }
+    }
+    choices
 }
 
 fn section(page: &gtk::Box, title: &str) -> gtk::Box {
@@ -576,13 +587,10 @@ impl Home {
             row(group, title, detail, &switch);
             controls.push((key.to_string(), Control::Switch(switch)));
         }
-        let mut sources = vec![("auto".to_string(), "System default".to_string())];
-        sources.extend(audio::sources());
-        if !sources.iter().any(|(key, _)| key == &values.input_target) {
-            sources.push((
-                values.input_target.clone(),
-                format!("{} (unavailable)", values.input_target),
-            ));
+        let mut sources = input_choices(Vec::new(), &[]);
+        if values.input_target != "auto" {
+            // Bare id until the refresh on show knows whether the device is plugged in.
+            sources.push((values.input_target.clone(), values.input_target.clone()));
         }
         for (key, title, detail, choices, group) in [
             (
@@ -662,7 +670,10 @@ impl Home {
             rows.push((item, dropdown.clone().upcast()));
             controls.push((
                 key.to_string(),
-                Control::Choice(dropdown, choices.into_iter().map(|(id, _)| id).collect()),
+                Control::Choice(
+                    dropdown,
+                    RefCell::new(choices.into_iter().map(|(id, _)| id).collect()),
+                ),
             ));
         }
         let model_actions = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -808,6 +819,7 @@ impl Home {
         ] {
             let capture = ShortcutCapture::new(title, value);
             row(&shortcuts, title, detail, &capture.button);
+            // Label after row(), which sets the accessible name to the bare title.
             capture.cancel();
             controls.push((key.into(), Control::Shortcut(capture)));
         }
@@ -945,12 +957,28 @@ impl Home {
             }
         });
         let weak = Rc::downgrade(&home);
-        home.window.add_tick_callback(move |window, _| {
-            let Some(home) = weak.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            home.resize_layout(window.width());
-            glib::ControlFlow::Continue
+        home.window.connect_show(move |_| {
+            let weak = weak.clone();
+            // pw-dump can take seconds, so list microphones off the GTK thread on every open.
+            glib::spawn_future_local(async move {
+                if let Ok(sources) = gio::spawn_blocking(audio::sources).await
+                    && let Some(home) = weak.upgrade()
+                {
+                    home.set_sources(sources);
+                }
+            });
+        });
+        let weak = Rc::downgrade(&home);
+        home.window.connect_realize(move |window| {
+            let weak = weak.clone();
+            // Fires on the first size and on interactive, tiled and maximized resizes.
+            if let Some(surface) = window.surface() {
+                surface.connect_width_notify(move |surface| {
+                    if let Some(home) = weak.upgrade() {
+                        home.resize_layout(surface.width());
+                    }
+                });
+            }
         });
         home.navigation
             .select_row(home.navigation.row_at_index(0).as_ref());
@@ -964,6 +992,35 @@ impl Home {
                 capture.cancel();
             }
         }
+    }
+
+    fn set_sources(&self, sources: Vec<(String, String)>) {
+        let Some((dropdown, ids)) = self
+            .controls
+            .iter()
+            .find_map(|(key, control)| match control {
+                Control::Choice(dropdown, ids) if key == "input_target" => Some((dropdown, ids)),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        let selected = ids
+            .borrow()
+            .get(dropdown.selected() as usize)
+            .cloned()
+            .unwrap_or_else(|| "auto".into());
+        let choices = input_choices(sources, &[&self.values.borrow().input_target, &selected]);
+        let labels: Vec<&str> = choices.iter().map(|(_, label)| label.as_str()).collect();
+        let position = choices.iter().position(|(id, _)| *id == selected);
+        // A refreshed device list is not an edit, so keep the save button as it was.
+        let (sensitive, label) = (self.save_button.is_sensitive(), self.save_button.label());
+        *ids.borrow_mut() = choices.iter().map(|(id, _)| id.clone()).collect();
+        dropdown.set_model(Some(&gtk::StringList::new(&labels)));
+        dropdown.set_selected(position.unwrap_or(0) as u32);
+        self.save_button.set_sensitive(sensitive);
+        self.save_button
+            .set_label(label.as_deref().unwrap_or_default());
     }
 
     pub fn changes(&self) -> anyhow::Result<Config> {
@@ -1144,12 +1201,56 @@ struct PillState {
     began: i64,
     width: f64,
     target: f64,
+    input: [i32; 4],
+}
+
+impl PillState {
+    fn animating(&self, animated: bool) -> bool {
+        self.phase == "recording"
+            || self.width != self.target
+            || (animated && matches!(self.phase.as_str(), "transcribing" | "delivering"))
+    }
+
+    /// Returns whether the phase or message changed.
+    fn set_phase(&mut self, phase: &str, message: &str) -> bool {
+        self.target = if phase == "recording" {
+            114.0
+        } else if matches!(phase, "starting" | "transcribing" | "delivering") {
+            48.0
+        } else {
+            310.0
+        };
+        if self.phase == phase && self.message == message {
+            return false;
+        }
+        if self.phase != phase {
+            self.began = glib::monotonic_time();
+            self.levels = [0.0; 11];
+        }
+        self.phase = phase.into();
+        self.message = message.into();
+        true
+    }
+
+    fn step(&mut self, animated: bool) {
+        // Snap the last half pixel so the tick callback can stop.
+        if animated && (self.target - self.width).abs() > 0.5 {
+            self.width += (self.target - self.width) * 0.2;
+        } else {
+            self.width = self.target;
+        }
+    }
+}
+
+fn animations() -> bool {
+    gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations())
 }
 
 pub struct Overlay {
     pub window: gtk::Window,
     area: gtk::DrawingArea,
     state: Rc<RefCell<PillState>>,
+    ticking: Rc<Cell<bool>>,
 }
 
 impl Overlay {
@@ -1196,6 +1297,7 @@ impl Overlay {
             began: 0,
             width: 270.0,
             target: 270.0,
+            input: [0; 4],
         }));
         let draw_state = state.clone();
         area.set_draw_func(move |area, cr, width, height| {
@@ -1206,26 +1308,21 @@ impl Overlay {
                 state.levels[10] = state.volume;
                 state.last_sample = now;
             }
-            let animated =
-                gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations());
-            if animated {
-                state.width += (state.target - state.width) * 0.2;
-            } else {
-                state.width = state.target;
-            }
+            let animated = animations();
+            state.step(animated);
             let w = state.width;
             let h = 48.0;
             let x = (width as f64 - w) / 2.0;
             let y = (height as f64 - h) / 2.0;
-            let surface = area.native().and_then(|native| native.surface());
-            if let Some(surface) = surface {
+            let input = [x as i32, y as i32, w.ceil() as i32, h as i32];
+            if state.input != input
+                && let Some(surface) = area.native().and_then(|native| native.surface())
+            {
                 let region = gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
-                    x as i32,
-                    y as i32,
-                    w.ceil() as i32,
-                    h as i32,
+                    input[0], input[1], input[2], input[3],
                 ));
                 surface.set_input_region(Some(&region));
+                state.input = input;
             }
             if matches!(state.phase.as_str(), "transcribing" | "delivering") {
                 let angle = if animated {
@@ -1330,43 +1427,45 @@ impl Overlay {
             }
         });
         area.add_controller(gesture);
-        area.add_tick_callback(|area, _| {
-            area.queue_draw();
-            glib::ControlFlow::Continue
-        });
         Ok(Self {
             window,
             area,
             state,
+            ticking: Rc::new(Cell::new(false)),
         })
     }
 
     pub fn update(&self, phase: &str, message: &str, visible: bool, volume: f64, duration: f64) {
         let mut state = self.state.borrow_mut();
-        if state.phase != phase {
-            state.began = glib::monotonic_time();
-            state.levels = [0.0; 11];
-        }
-        state.phase = phase.into();
-        state.message = message.into();
         state.volume = volume;
         state.duration = duration;
-        state.target = if phase == "recording" {
-            114.0
-        } else if matches!(phase, "starting" | "transcribing" | "delivering") {
-            48.0
-        } else {
-            310.0
-        };
-        self.area
-            .update_property(&[gtk::accessible::Property::Label(message)]);
-        self.window.set_tooltip_text(Some(if phase == "recording" {
-            "Click to finish dictation. Right-click to cancel."
-        } else {
-            message
-        }));
-        self.window.set_visible(visible);
+        // Audio frames repeat the phase about 20 times a second; skip the accessibility churn.
+        if state.set_phase(phase, message) || self.window.is_visible() != visible {
+            self.area
+                .update_property(&[gtk::accessible::Property::Label(message)]);
+            self.window.set_tooltip_text(Some(if phase == "recording" {
+                "Click to finish dictation. Right-click to cancel."
+            } else {
+                message
+            }));
+            self.window.set_visible(visible);
+        }
+        let animating = visible && state.animating(animations());
+        drop(state);
         self.area.queue_draw();
+        if animating && !self.ticking.replace(true) {
+            let state = self.state.clone();
+            let ticking = self.ticking.clone();
+            self.area.add_tick_callback(move |area, _| {
+                area.queue_draw();
+                if area.is_mapped() && state.borrow().animating(animations()) {
+                    glib::ControlFlow::Continue
+                } else {
+                    ticking.set(false);
+                    glib::ControlFlow::Break
+                }
+            });
+        }
     }
 }
 
@@ -1388,4 +1487,83 @@ fn capsule(cr: &gtk::cairo::Context, x: f64, y: f64, width: f64, height: f64) {
         3.0 * std::f64::consts::FRAC_PI_2,
     );
     cr.close_path();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn idle_pill() -> PillState {
+        PillState {
+            phase: "idle".into(),
+            message: "Ready".into(),
+            volume: 0.0,
+            duration: 0.0,
+            levels: [0.0; 11],
+            last_sample: 0,
+            began: 0,
+            width: 310.0,
+            target: 310.0,
+            input: [0; 4],
+        }
+    }
+
+    #[test]
+    fn overlay_ticks_only_while_something_moves() {
+        let mut pill = idle_pill();
+        assert!(!pill.animating(true));
+        pill.target = 114.0;
+        assert!(pill.animating(true));
+        pill.phase = "recording".into();
+        pill.width = 114.0;
+        assert!(pill.animating(false));
+        pill.phase = "transcribing".into();
+        pill.width = 48.0;
+        pill.target = 48.0;
+        assert!(pill.animating(true));
+        assert!(!pill.animating(false));
+    }
+
+    #[test]
+    fn overlay_width_settles_exactly_so_the_tick_stops() {
+        let mut pill = idle_pill();
+        pill.set_phase("transcribing", "Transcribing");
+        for _ in 0..1000 {
+            pill.step(true);
+        }
+        assert_eq!(pill.width, 48.0);
+        assert!(!pill.animating(false));
+    }
+
+    #[test]
+    fn repeated_audio_frames_keep_the_overlay_phase() {
+        let mut pill = idle_pill();
+        assert!(pill.set_phase("recording", "Listening"));
+        pill.levels[10] = 0.6;
+        let began = pill.began;
+        assert!(!pill.set_phase("recording", "Listening"));
+        assert_eq!(
+            (pill.began, pill.levels[10], pill.target),
+            (began, 0.6, 114.0)
+        );
+        assert!(pill.set_phase("recording", "Microphone busy"));
+        assert_eq!(pill.levels[10], 0.6);
+    }
+
+    #[test]
+    fn refreshed_input_choices_keep_saved_and_selected_devices() {
+        let choices = input_choices(
+            vec![("usb".into(), "USB microphone".into())],
+            &["unplugged", "usb", "auto", "unplugged"],
+        );
+        assert_eq!(
+            choices,
+            [
+                ("auto", "System default"),
+                ("usb", "USB microphone"),
+                ("unplugged", "unplugged (unavailable)"),
+            ]
+            .map(|(id, label)| (id.to_string(), label.to_string()))
+        );
+    }
 }

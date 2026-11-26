@@ -298,6 +298,8 @@ impl<'api> Decoder<'api> {
         )
         .context("initialize offline recognizer")?;
         let vad = if let Some(model) = &options.vad {
+            // App requests are at most one piece, so VAD never enters long-speech mode or regrows.
+            let piece = options.max_piece_seconds as f32;
             let config = SherpaOnnxVadModelConfig {
                 silero_vad: SherpaOnnxSileroVadModelConfig {
                     model: model.as_ptr(),
@@ -305,7 +307,7 @@ impl<'api> Decoder<'api> {
                     min_silence_duration: options.vad_min_silence,
                     min_speech_duration: 0.06,
                     window_size: VAD_WINDOW as i32,
-                    max_speech_duration: 60.0,
+                    max_speech_duration: piece,
                 },
                 sample_rate: SAMPLE_RATE,
                 num_threads: 1,
@@ -315,7 +317,7 @@ impl<'api> Decoder<'api> {
             Some(
                 Native::new(
                     api,
-                    unsafe { (api.SherpaOnnxCreateVoiceActivityDetector)(&config, 65.0) },
+                    unsafe { (api.SherpaOnnxCreateVoiceActivityDetector)(&config, piece + 5.0) },
                     api.SherpaOnnxDestroyVoiceActivityDetector,
                 )
                 .context("initialize voice activity detector")?,
@@ -374,62 +376,53 @@ impl<'api> Decoder<'api> {
                 api.SherpaOnnxDestroyDenoisedAudio,
             )
         });
-        let audio = clean
-            .as_ref()
-            .and_then(|clean| {
-                let audio = clean.get();
-                if audio.n > 0 && audio.sample_rate == SAMPLE_RATE && !audio.samples.is_null() {
-                    // The pinned API owns n readable samples for the result's lifetime.
-                    Some(unsafe { slice::from_raw_parts(audio.samples, audio.n as usize) })
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(&samples);
+        let mut audio = samples;
+        if let Some(denoised) = clean.as_ref().and_then(|clean| {
+            let audio = clean.get();
+            if audio.n > 0 && audio.sample_rate == SAMPLE_RATE && !audio.samples.is_null() {
+                // The pinned API owns n readable samples for the result's lifetime.
+                Some(unsafe { slice::from_raw_parts(audio.samples, audio.n as usize) })
+            } else {
+                None
+            }
+        }) {
+            // Reuse the input allocation instead of keeping both buffers.
+            audio.clear();
+            audio.extend_from_slice(denoised);
+        }
+        drop(clean);
         // Quiet-input measurements found VAD deletions, so the opt-in gain runs
         // before VAD, after denoising. Gain never exceeds +20 dB.
-        let normalized = self.normalize_gain.then(|| {
-            let mut audio = audio.to_vec();
+        if self.normalize_gain {
             normalize_gain(&mut audio);
-            audio
-        });
-        let audio = normalized.as_deref().unwrap_or(audio);
-        let fallback = (self.soft_speech_retry && audible_speech(audio)).then(|| audio.to_vec());
-        let (speech, time_map) = if let Some(vad) = &self.vad {
-            let (speech, time_map) = speech_only(api, vad.as_ptr(), audio, self.preserve_pauses)?;
+        }
+        let audible = self.soft_speech_retry && audible_speech(&audio);
+        let (audio, time_map, fallback) = if let Some(vad) = &self.vad {
+            let (speech, time_map) = speech_only(api, vad.as_ptr(), &audio, self.preserve_pauses)?;
             let seconds = audio.len() as f32 / SAMPLE_RATE as f32;
             let mut stderr = io::stderr().lock();
             if speech.is_empty() {
                 let _ = writeln!(stderr, "vad heard no speech in {seconds:.2} s");
-                if !self.soft_speech_retry || !audible_speech(audio) {
+                if !audible {
                     return send_result(output, b"{\"text\":\"\"}").context("write empty result");
                 }
                 let _ = writeln!(
                     stderr,
                     "energy gate found audible speech; retrying once without VAD"
                 );
+                (audio, time_map, None)
             } else {
                 let kept = speech.len() as f32 / SAMPLE_RATE as f32;
                 let _ = writeln!(stderr, "vad kept {kept:.2} of {seconds:.2} s");
+                // Decoding is deterministic, so only audio that VAD changed is worth a retry.
+                let fallback = (audible && speech != audio).then_some(audio);
+                (speech, time_map, fallback)
             }
-            (speech, time_map)
         } else {
-            (Vec::new(), Vec::new())
+            (audio, Vec::new(), None)
         };
-        let audio = if speech.is_empty() { audio } else { &speech };
-
-        let vad_missed = self.vad.is_some() && speech.is_empty();
-        let audio = if !speech.is_empty() {
-            speech
-        } else if normalized.is_some() || clean.is_some() {
-            audio.to_vec()
-        } else {
-            samples
-        };
-        drop(clean);
-        drop(normalized);
         let mut response = self.decode_audio(audio, &time_map)?;
-        if !vad_missed && let Some(fallback) = fallback {
+        if let Some(fallback) = fallback {
             let value: serde_json::Value = serde_json::from_slice(&response)?;
             if value
                 .get("text")
