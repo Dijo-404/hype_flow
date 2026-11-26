@@ -1206,6 +1206,36 @@ impl PillState {
             || self.width != self.target
             || (animated && matches!(self.phase.as_str(), "transcribing" | "delivering"))
     }
+
+    /// Returns whether the phase or message changed.
+    fn set_phase(&mut self, phase: &str, message: &str) -> bool {
+        self.target = if phase == "recording" {
+            114.0
+        } else if matches!(phase, "starting" | "transcribing" | "delivering") {
+            48.0
+        } else {
+            310.0
+        };
+        if self.phase == phase && self.message == message {
+            return false;
+        }
+        if self.phase != phase {
+            self.began = glib::monotonic_time();
+            self.levels = [0.0; 11];
+        }
+        self.phase = phase.into();
+        self.message = message.into();
+        true
+    }
+
+    fn step(&mut self, animated: bool) {
+        // Snap the last half pixel so the tick callback can stop.
+        if animated && (self.target - self.width).abs() > 0.5 {
+            self.width += (self.target - self.width) * 0.2;
+        } else {
+            self.width = self.target;
+        }
+    }
 }
 
 fn animations() -> bool {
@@ -1275,12 +1305,7 @@ impl Overlay {
                 state.last_sample = now;
             }
             let animated = animations();
-            // Snap the last half pixel so the tick callback can stop.
-            if animated && (state.target - state.width).abs() > 0.5 {
-                state.width += (state.target - state.width) * 0.2;
-            } else {
-                state.width = state.target;
-            }
+            state.step(animated);
             let w = state.width;
             let h = 48.0;
             let x = (width as f64 - w) / 2.0;
@@ -1411,20 +1436,7 @@ impl Overlay {
         state.volume = volume;
         state.duration = duration;
         // Audio frames repeat the phase about 20 times a second; skip the accessibility churn.
-        if state.phase != phase || state.message != message || self.window.is_visible() != visible {
-            if state.phase != phase {
-                state.began = glib::monotonic_time();
-                state.levels = [0.0; 11];
-            }
-            state.phase = phase.into();
-            state.message = message.into();
-            state.target = if phase == "recording" {
-                114.0
-            } else if matches!(phase, "starting" | "transcribing" | "delivering") {
-                48.0
-            } else {
-                310.0
-            };
+        if state.set_phase(phase, message) || self.window.is_visible() != visible {
             self.area
                 .update_property(&[gtk::accessible::Property::Label(message)]);
             self.window.set_tooltip_text(Some(if phase == "recording" {
@@ -1477,9 +1489,8 @@ fn capsule(cr: &gtk::cairo::Context, x: f64, y: f64, width: f64, height: f64) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn overlay_ticks_only_while_something_moves() {
-        let mut pill = PillState {
+    fn idle_pill() -> PillState {
+        PillState {
             phase: "idle".into(),
             message: "Ready".into(),
             volume: 0.0,
@@ -1490,7 +1501,12 @@ mod tests {
             width: 310.0,
             target: 310.0,
             input: [0; 4],
-        };
+        }
+    }
+
+    #[test]
+    fn overlay_ticks_only_while_something_moves() {
+        let mut pill = idle_pill();
         assert!(!pill.animating(true));
         pill.target = 114.0;
         assert!(pill.animating(true));
@@ -1502,6 +1518,32 @@ mod tests {
         pill.target = 48.0;
         assert!(pill.animating(true));
         assert!(!pill.animating(false));
+    }
+
+    #[test]
+    fn overlay_width_settles_exactly_so_the_tick_stops() {
+        let mut pill = idle_pill();
+        pill.set_phase("transcribing", "Transcribing");
+        for _ in 0..1000 {
+            pill.step(true);
+        }
+        assert_eq!(pill.width, 48.0);
+        assert!(!pill.animating(false));
+    }
+
+    #[test]
+    fn repeated_audio_frames_keep_the_overlay_phase() {
+        let mut pill = idle_pill();
+        assert!(pill.set_phase("recording", "Listening"));
+        pill.levels[10] = 0.6;
+        let began = pill.began;
+        assert!(!pill.set_phase("recording", "Listening"));
+        assert_eq!(
+            (pill.began, pill.levels[10], pill.target),
+            (began, 0.6, 114.0)
+        );
+        assert!(pill.set_phase("recording", "Microphone busy"));
+        assert_eq!(pill.levels[10], 0.6);
     }
 
     #[test]
