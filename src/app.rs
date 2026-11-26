@@ -735,7 +735,8 @@ impl AppState {
                         if text.is_empty() {
                             self.publish(
                                 "done",
-                                "All words filtered · original saved",
+                                note.as_deref()
+                                    .unwrap_or("All words filtered · original saved"),
                                 true,
                                 0.0,
                                 0.0,
