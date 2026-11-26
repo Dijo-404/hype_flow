@@ -130,6 +130,7 @@ fn playerctl(args: &[&str]) -> Option<String> {
 }
 
 fn pause_playing(paused: &mut Vec<String>) {
+    // shortcut: one hung player times out this query and nothing is paused, query players one by one if that bites.
     let Ok(output) = run_command(
         Command::new("playerctl").args([
             "--all-players",
