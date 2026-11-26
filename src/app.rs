@@ -342,14 +342,8 @@ impl AppState {
         if self.values.pause_media {
             self.media.pause();
         }
-        if self.session.unloaded {
-            self.session.unloaded = false;
-            let engine = self.engine.clone();
-            let epoch = engine.recording_epoch();
-            self.workers.push(thread::spawn(move || {
-                let _ = engine.ensure_scoped(epoch, &|| false);
-            }));
-        }
+        // The eager capture thread loads the worker as soon as the microphone opens.
+        self.session.unloaded = false;
         let tx = self.tx.clone();
         let target = self.values.input_target.clone();
         let hold = self.values.keep_mic_ready;
