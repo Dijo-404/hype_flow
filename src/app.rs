@@ -835,7 +835,6 @@ impl AppState {
                         values.model = model.clone();
                         values.server = server;
                         values.language = "en".into();
-                        values.gpu = false;
                         if self.save(values)
                             && let Some(home) = &self.home
                         {

@@ -14,7 +14,7 @@ cancel_shortcut = "Mod+Ctrl+Escape"
 # Model files and runtime installed by the app:
 # model = "/absolute/path/to/parakeet-110m-ctc-en-int8"
 # server = "/absolute/path/to/backend/parakeet/recognizer"
-# gpu is retained for compatibility; this runtime uses the CPU.
+# An old gpu setting is ignored; this runtime uses the CPU.
 
 # Names and phrases, separated by commas or newlines; at most 100 entries.
 # Empty by default. Listed spellings also supply preferred capitalization.

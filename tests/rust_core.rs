@@ -266,7 +266,7 @@ fn check_config_paths(root: &std::path::Path) {
         );
     }
     let original = format!(
-        "model = \"{0}/models/ggml-large-v3.bin\"\nserver = \"{0}/backend/whisper-server-linux-x64-vulkan\"\nprompt = \"Saved names\"\npaste = false\nboost_score = 2\n",
+        "model = \"{0}/models/ggml-large-v3.bin\"\nserver = \"{0}/backend/whisper-server-linux-x64-vulkan\"\ngpu = true\nprompt = \"Saved names\"\npaste = false\nboost_score = 2\n",
         directory.display(),
     );
     fs::write(&path, &original).unwrap();
@@ -283,6 +283,7 @@ fn check_config_paths(root: &std::path::Path) {
     values.prompt = "नमस्ते, \"niri\"\nproject".into();
     values.save().unwrap();
     assert_eq!(Config::load().unwrap(), values);
+    assert!(!fs::read_to_string(&path).unwrap().contains("gpu"));
     assert_eq!(fs::read_to_string(&backup).unwrap(), original);
     for saved in [&path, &backup] {
         assert_eq!(

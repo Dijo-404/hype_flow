@@ -75,7 +75,7 @@ def inside(root, low_memory_archive, ctc_archive):
         assert values["model"] == str(model)
         assert values["feature_dim"] == (80 if archive else 128)
         assert values["server"] == str(data / "backend/parakeet/recognizer")
-        assert values["language"] == "en" and not values["gpu"]
+        assert values["language"] == "en" and "gpu" not in values
         assert not values["paste"] and values["prompt"] == "Saved names"
         assert (configuration / "config.toml.previous").read_text() == initial
         assert (model / "bpe.vocab").is_file() == (not archive)

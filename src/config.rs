@@ -72,7 +72,6 @@ pub struct Config {
     pub vad_threshold: f32,
     pub vad_min_silence: f32,
     pub max_piece_seconds: u32,
-    pub gpu: bool,
     pub paste: bool,
     pub modifier_release_guard: bool,
     pub input_target: String,
@@ -137,7 +136,6 @@ impl Default for Config {
             vad_threshold: 0.3,
             vad_min_silence: 0.45,
             max_piece_seconds: 15,
-            gpu: false,
             paste: true,
             modifier_release_guard: false,
             input_target: "auto".into(),
@@ -223,6 +221,8 @@ impl Config {
         let mut values = match read_existing(&path)? {
             Some(text) => {
                 let mut supplied: toml::Table = toml::from_str(&text)?;
+                // Older configurations carry an unused gpu flag.
+                supplied.remove("gpu");
                 let defaults = toml::Table::try_from(Self::default())?;
                 let mut unknown: Vec<_> = supplied
                     .keys()
