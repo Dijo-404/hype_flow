@@ -128,25 +128,30 @@ fn normalize_word(w: &str) -> String {
 /// Whether a sentence is worth handing to the converter at all.
 fn has_quantity_trigger(sentence: &str) -> bool {
     let words: Vec<String> = sentence.split_whitespace().map(normalize_word).collect();
+    // The last word keeps the sentence's full stop ("dollars."); "a.m." needs it.
+    let bare: Vec<&str> = words.iter().map(|w| w.trim_end_matches('.')).collect();
+    let is_number =
+        |w: &str| number_words().contains(w) || w.starts_with(|c: char| c.is_ascii_digit());
 
-    let marker = words.iter().any(|w| {
-        CURRENCY.contains(&w.as_str())
-            || TIME_MARKERS.contains(&w.as_str())
-            || UNITS.contains(&w.as_str())
+    let marker = (0..words.len()).any(|i| {
+        let w = bare[i];
+        let time = TIME_MARKERS.contains(&words[i].as_str()) || TIME_MARKERS.contains(&w);
+        // "I am sending" is a verb: a bare am/pm only counts after a number.
+        let time = time && (!matches!(w, "am" | "pm") || i > 0 && is_number(bare[i - 1]));
+        CURRENCY.contains(&w) || UNITS.contains(&w) || time
     });
     if marker {
         return true;
     }
     // "a m" / "p m" arrive as two tokens from most engines.
-    for pair in words.windows(2) {
+    for pair in bare.windows(2) {
         if (pair[0] == "a" || pair[0] == "p") && pair[1] == "m" {
             return true;
         }
     }
     // A compound number ("twenty five") is a quantity almost by definition.
-    words
-        .windows(2)
-        .any(|p| number_words().contains(p[0].as_str()) && number_words().contains(p[1].as_str()))
+    bare.windows(2)
+        .any(|p| number_words().contains(p[0]) && number_words().contains(p[1]))
 }
 
 /// Reject a rewrite that turns a single prose-heavy word into a digit.
@@ -288,6 +293,8 @@ pub fn apply(text: &str) -> String {
         let converted = text_processing_rs::normalize_sentence_with_options(&spaced, opts);
         let converted = strip_leading_zero_hour(&converted);
         let converted = fix_time_separator(&converted);
+        // A sentence-final "pm." becomes "p.m." plus the sentence's own full stop.
+        let converted = converted.replace("a.m..", "a.m.").replace("p.m..", "p.m.");
         out.push_str(&reconcile(sentence, &converted));
     }
     out
@@ -410,6 +417,23 @@ mod tests {
     fn hyphen_splitting_only_applies_to_number_pairs() {
         let s = "It is a well-known follow-up issue.";
         assert_eq!(apply(s), s);
+    }
+
+    #[test]
+    fn sentence_final_quantities_convert_but_the_verb_am_does_not() {
+        assert_eq!(apply("It costs five dollars."), "It costs $5.");
+        assert_eq!(
+            apply("I'll be there in ten minutes."),
+            "I'll be there in 10 minutes."
+        );
+        assert_eq!(apply("Meet at five p m."), "Meet at 5:00 p.m.");
+        assert_eq!(apply("Meet at five pm."), "Meet at 5:00 p.m.");
+        for s in [
+            "I am sending four files to nine people",
+            "I am here at five.",
+        ] {
+            assert_eq!(apply(s), s);
+        }
     }
 
     #[test]
