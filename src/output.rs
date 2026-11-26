@@ -48,7 +48,6 @@ const TERMINALS: &[&str] = &[
 ];
 const RESTORE_DELAY: Duration = Duration::from_millis(800);
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(3);
-const CLIPBOARD_LIMIT: usize = 32 * 1024 * 1024;
 const TEXT_MIME: &str = "text/plain;charset=utf-8";
 struct Selection {
     generation: u64,
@@ -188,7 +187,7 @@ fn read_selection(kind: &str, primary: bool) -> Option<Vec<u8>> {
         CLIPBOARD_TIMEOUT,
     )
     .ok()?;
-    (output.status.success() && output.stdout.len() <= CLIPBOARD_LIMIT).then_some(output.stdout)
+    output.status.success().then_some(output.stdout)
 }
 
 fn previous_selection(primary: bool) -> Option<Clipboard> {
