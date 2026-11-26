@@ -12,7 +12,7 @@ use std::{
     ffi::{CString, OsStr},
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
-    os::unix::{ffi::OsStrExt, fs::OpenOptionsExt},
+    os::unix::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawFd},
     path::{Component, Path, PathBuf},
     process::Command,
     time::{Duration, Instant},
@@ -569,6 +569,11 @@ pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String
     let mut targets = vec![(runtime, runtime_target)];
     if !reuse_model {
         targets.push((model, model_target));
+    }
+    let staged = File::open(stage.path())?;
+    // Flush staged files first so a power loss cannot leave empty files active.
+    if unsafe { libc::syncfs(staged.as_raw_fd()) } != 0 {
+        return Err(io::Error::last_os_error()).context("Could not flush staged speech files");
     }
     activate(stage, &targets)?;
     // The verified archive is fully extracted; keeping it would double the model's disk use.
