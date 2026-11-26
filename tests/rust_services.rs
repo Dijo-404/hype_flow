@@ -509,9 +509,8 @@ fn exercise_services(root: &Path) {
     executable(
         &bin.join("playerctl"),
         r#"case "$*" in
-        --list-all) printf 'playing\nresting\nfailed\n' ;;
-        '--player playing status'|'--player failed status') printf 'Playing\n' ;;
-        '--player resting status') printf 'Paused\n' ;;
+        "--all-players --format {{playerInstance}}$(printf '\t'){{status}} status")
+            printf 'playing\tPlaying\nresting\tPaused\nfailed\tPlaying\n' ;;
         '--player failed pause') exit 1 ;;
         '--player playing play') sleep 0.1; printf '%s\n' "$*" >> "$HOME/player-actions" ;;
         *) printf '%s\n' "$*" >> "$HOME/player-actions" ;;
