@@ -391,7 +391,7 @@ impl<'api> Decoder<'api> {
             audio.extend_from_slice(denoised);
         }
         drop(clean);
-        // Quiet-input measurements found VAD deletions, so the opt-in gain runs
+        // Quiet-input measurements found VAD deletions, so the optional gain runs
         // before VAD, after denoising. Gain never exceeds +20 dB.
         if self.normalize_gain {
             normalize_gain(&mut audio);

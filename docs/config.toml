@@ -60,9 +60,9 @@ keep_mic_ready = false  # holds the microphone open for 30 seconds after stoppin
 # 4294967295 = after each dictation. Reload overlaps the next recording.
 unload_minutes = 10
 
-# Experimental quiet-input gain after denoising and before VAD; at most +20 dB.
-# Zero/very-low-level noise is unchanged. Off until broader corpus validation.
-normalize_gain = false
+# Quiet-input gain after denoising and before VAD; at most +20 dB.
+# Zero/very-low-level noise is unchanged. Lowers deletions in soft speech.
+normalize_gain = true
 
 # Optional private audio storage under $XDG_STATE_HOME/hype-flow (default: off).
 # Recovery stores failed/interrupted recordings; history stores successful ones.

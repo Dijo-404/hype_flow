@@ -158,7 +158,7 @@ impl Default for Config {
             unload_minutes: 10,
             cut_silence: true,
             noise_suppression: false,
-            normalize_gain: false,
+            normalize_gain: true,
             recover_recordings: false,
             history_enabled: false,
             spoken_commands: false,

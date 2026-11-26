@@ -196,6 +196,16 @@ remain selectable for lower memory and latency.
 [Unified results](eval-results/public/unified.json),
 [CTC results](eval-results/public/ctc/pauses.json).
 
+Quiet-input gain is now on by default. With Unified on the same 1,400 clips,
+it lowered Whisper WER from 6.44% to 6.26% and deletions from 777 to 728.
+Earnings22 rose from 12.24% to 12.37%; the other sets held or improved. A quiet
+set took the first 20 clips of each public set and scaled their peaks to −30
+and −40 dBFS. On those 280 cases, gain lowered macro WER from 10.16% to 7.29%.
+At −40 dBFS, WER fell from 10.49% to 6.36% and deletions from 162 to 69.
+[Public gain results](eval-results/public/gain.json),
+[quiet baseline](eval-results/public/quiet/baseline.json),
+[quiet gain](eval-results/public/quiet/gain.json).
+
 The earlier CTC default is recorded below.
 
 Parakeet 110M CTC INT8 was the first-run default. On 1,400 matched public clips,
