@@ -174,6 +174,10 @@ fn config_paths_validation_and_backup_contract() {
         .env_remove("XDG_RUNTIME_DIR")
         .env("HOME", root.path());
     assert!(check.status().unwrap().success());
+    check
+        .env("XDG_DATA_HOME", "")
+        .env("XDG_CONFIG_HOME", "relative");
+    assert!(check.status().unwrap().success());
     let xdg = root.path().join("xdg");
     fs::create_dir(&xdg).unwrap();
     check
@@ -184,7 +188,7 @@ fn config_paths_validation_and_backup_contract() {
 }
 
 fn check_config_paths(root: &std::path::Path) {
-    if std::env::var_os("XDG_CONFIG_HOME").is_none() {
+    if std::env::var_os("XDG_CONFIG_HOME").is_none_or(|value| value == "relative") {
         assert_eq!(config::config_dir(), root.join(".config/hype-flow"));
         assert_eq!(config::data_dir(), root.join(".local/share/hype-flow"));
         assert!(config::runtime_dir().is_err());

@@ -26,6 +26,8 @@ pub fn config_dir() -> PathBuf {
 fn xdg_dir(variable: &str, home_relative: &str) -> PathBuf {
     env::var_os(variable)
         .map(PathBuf::from)
+        // The XDG spec says to ignore empty and relative values.
+        .filter(|path| path.is_absolute())
         .unwrap_or_else(|| env::home_dir().unwrap_or_default().join(home_relative))
         .join("hype-flow")
 }
