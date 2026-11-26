@@ -265,7 +265,7 @@ fn strip_leading_zero_hour(text: &str) -> String {
 fn fix_time_separator(text: &str) -> String {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r"(?i)\b(\d{1,2})\.(\d{2})(\s*[ap]\.?m\.?)")
+        regex::Regex::new(r"(?i)\b(\d{1,2})\.(\d{2})(\s*[ap]\.?m\b\.?)")
             .expect("BUG: time-separator regex is a compile-time constant and must be valid")
     });
     re.replace_all(text, "$1:$2$3").into_owned()
@@ -447,5 +447,9 @@ mod tests {
         // No meridiem marker, so these must not become clock times.
         assert_eq!(apply("it costs $3.30 a month"), "it costs $3.30 a month");
         assert_eq!(apply("version 1.20 shipped"), "version 1.20 shipped");
+        assert_eq!(
+            apply("I paid 3.30 amazingly fast in five days"),
+            "I paid 3.30 amazingly fast in 5 days"
+        );
     }
 }
