@@ -269,7 +269,7 @@ fn fix_time_separator(text: &str) -> String {
 /// Apply inverse text normalization, conservatively.
 pub fn apply(text: &str) -> String {
     let opts = text_processing_rs::NormalizeOptions {
-        concat_compound_numbers: false,
+        concat_compound_numbers: true,
         max_span_tokens: None,
         // "give me a second" must not become "a 2nd".
         disable_bare_second: true,

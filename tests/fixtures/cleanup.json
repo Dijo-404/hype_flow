@@ -251,5 +251,15 @@
       "vocabulary_boosting": true
     },
     "output": "Postgres is useful and OpenAI works with Sinead"
+  },
+  {
+    "input": "Back in twenty twenty we moved.",
+    "settings": { "format_numbers": true },
+    "output": "Back in 2020 we moved."
+  },
+  {
+    "input": "Call five five five one two one two.",
+    "settings": { "format_numbers": true, "remove_repetitions": true },
+    "output": "Call 5551212."
   }
 ]
