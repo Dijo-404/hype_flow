@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use anyhow::{Context, Result, ensure};
 use fancy_regex::Regex as FancyRegex;
@@ -126,22 +126,19 @@ fn edit_matches(
     Ok(result)
 }
 
-struct Replacements<'a> {
+struct Replacements {
     pattern: FancyRegex,
-    values: HashMap<&'a str, &'a str>,
+    values: HashMap<String, String>,
 }
 
-impl<'a> Replacements<'a> {
-    fn new(pairs: &'a [(String, String)]) -> Result<Option<Self>> {
+impl Replacements {
+    fn new(pairs: &[(String, String)]) -> Result<Option<Self>> {
         let Some(pattern) = pattern(pairs.iter().map(|(key, _)| key.as_str())) else {
             return Ok(None);
         };
         Ok(Some(Self {
             pattern: FancyRegex::new(&pattern)?,
-            values: pairs
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str()))
-                .collect(),
+            values: pairs.iter().cloned().collect(),
         }))
     }
 
@@ -458,6 +455,64 @@ fn vocabulary_echo(text: &str, vocabulary: &[(String, String)]) -> bool {
     matched >= 3 && covered * 4 >= words.len() * 3
 }
 
+/// Patterns built from the settings' word lists.
+struct Compiled {
+    blocked: Vec<String>,
+    vocabulary_rules: Option<Replacements>,
+    replacements: Option<Replacements>,
+    filters: Option<FancyRegex>,
+}
+
+type CompiledKey = (String, String, String, bool, bool);
+
+/// Long word lists take tens of milliseconds to compile, so reuse the last
+/// build until a setting it depends on changes.
+fn compiled(values: &Config, vocabulary: &[(String, String)]) -> Result<Arc<Compiled>> {
+    static CACHE: Mutex<Option<(CompiledKey, Arc<Compiled>)>> = Mutex::new(None);
+    let key = (
+        values.prompt.clone(),
+        values.corrections.clone(),
+        values.blocked_words.clone(),
+        values.auto_correct,
+        values.filter_words,
+    );
+    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((cached, compiled)) = &*cache
+        && *cached == key
+    {
+        return Ok(compiled.clone());
+    }
+    let rules = corrections(&values.corrections)?;
+    let blocked = terms(&values.blocked_words)?;
+    let vocabulary_rules = values
+        .auto_correct
+        .then(|| Replacements::new(vocabulary))
+        .transpose()?
+        .flatten();
+    let replacements = values
+        .auto_correct
+        .then(|| Replacements::new(&rules))
+        .transpose()?
+        .flatten();
+    let filters = if values.filter_words
+        && let Some(pattern) = pattern(blocked.iter().map(String::as_str))
+    {
+        Some(FancyRegex::new(&format!(
+            r"(?:,{SPACE}*)?{pattern}(?:{SPACE}*[,;:])?"
+        ))?)
+    } else {
+        None
+    };
+    let compiled = Arc::new(Compiled {
+        blocked,
+        vocabulary_rules,
+        replacements,
+        filters,
+    });
+    *cache = Some((key, compiled.clone()));
+    Ok(compiled)
+}
+
 pub fn process(text: &str, values: &Config) -> Result<String> {
     process_with_confidence(text, values, &[])
 }
@@ -506,28 +561,14 @@ pub fn process_with_confidence(
     {
         return Ok(String::new());
     }
-    let rules = corrections(&values.corrections)?;
-    let blocked = terms(&values.blocked_words)?;
-    let vocabulary_rules = values
-        .auto_correct
-        .then(|| Replacements::new(&vocabulary))
-        .transpose()?
-        .flatten();
-    let replacements = values
-        .auto_correct
-        .then(|| Replacements::new(&rules))
-        .transpose()?
-        .flatten();
+    let compiled = compiled(values, &vocabulary)?;
+    let Compiled {
+        blocked,
+        vocabulary_rules,
+        replacements,
+        filters,
+    } = &*compiled;
     let fuzzy = values.fuzzy_vocabulary.then(|| fuzzy_keys(&vocabulary));
-    let filters = if values.filter_words
-        && let Some(pattern) = pattern(blocked.iter().map(String::as_str))
-    {
-        Some(FancyRegex::new(&format!(
-            r"(?:,{SPACE}*)?{pattern}(?:{SPACE}*[,;:])?"
-        ))?)
-    } else {
-        None
-    };
     let mut removed = false;
     let mut plain = |segment: &str| -> Result<String> {
         // Stages that rebuild text from words drop the spaces joining it to a protected span.
@@ -670,6 +711,24 @@ mod product_tests {
             process("One of the things. No one knows.", &values).unwrap(),
             "One of the things. No one knows."
         );
+    }
+    #[test]
+    fn compiled_patterns_follow_settings_changes() {
+        let mut values = Config {
+            corrections: "foo => bar".into(),
+            ..Config::default()
+        };
+        assert_eq!(process("foo um", &values).unwrap(), "bar");
+        values.corrections = "foo => baz".into();
+        assert_eq!(process("foo um", &values).unwrap(), "baz");
+        values.auto_correct = false;
+        values.filter_words = false;
+        assert_eq!(process("foo um", &values).unwrap(), "foo um");
+        values.auto_correct = true;
+        values.filter_words = true;
+        values.corrections.clear();
+        values.blocked_words = "foo".into();
+        assert_eq!(process("foo um", &values).unwrap(), "um");
     }
     #[test]
     fn confidence_only_permits_low_confidence_unambiguous_words() {
