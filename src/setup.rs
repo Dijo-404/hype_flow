@@ -335,6 +335,22 @@ fn extract_model(archive: &Path, model: &Path, files: &[&str], expected_bytes: u
     Ok(())
 }
 
+// Extraction wrote these exact sizes from a verified archive, so matching sizes avoid rehashing it.
+fn model_installed(model: &Path, specification: &ModelSpec) -> bool {
+    specification
+        .files
+        .iter()
+        .map(|name| {
+            fs::metadata(model.join(name))
+                .ok()
+                .filter(|info| info.is_file())
+                .map(|info| info.len())
+        })
+        .sum::<Option<u64>>()
+        == Some(specification.bytes)
+        && (!specification.boosting || model.join("bpe.vocab").is_file())
+}
+
 fn exists(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
@@ -485,19 +501,24 @@ pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String
         BACKEND_SHA256,
         &progress,
     )?;
-    let model_archive = downloads.join(format!("{}.tar.bz2", specification.name));
-    download(
-        &client,
-        &format!(
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}",
-            specification.archive
-        ),
-        &model_archive,
-        specification.sha256,
-        &progress,
-    )?;
     let backend = root.join("backend");
     let models = root.join("models");
+    let model_target = models.join(specification.name);
+    // A stale worker or audio model alone must not unpack the speech model again.
+    let reuse_model = model_installed(&model_target, &specification);
+    let model_archive = downloads.join(format!("{}.tar.bz2", specification.name));
+    if !reuse_model {
+        download(
+            &client,
+            &format!(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}",
+                specification.archive
+            ),
+            &model_archive,
+            specification.sha256,
+            &progress,
+        )?;
+    }
     fs::create_dir_all(&backend)?;
     fs::create_dir_all(&models)?;
     for (name, url, expected) in AUDIO_MODELS {
@@ -510,30 +531,31 @@ pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String
     progress("Installing speech runtime");
     extract_runtime(&archive, &runtime)?;
     stage_worker(&runtime, &shipped_worker)?;
-    progress(&format!("Installing {}", specification.label));
-    extract_model(
-        &model_archive,
-        &model,
-        specification.files,
-        specification.bytes,
-    )?;
-    if specification.boosting {
-        let tokenizer = downloads.join("parakeet-unified-tokenizer.model");
-        download(
-            &client,
-            &format!(
-                "https://huggingface.co/eschmidbauer/parakeet-unified-en-0.6b-onnx/resolve/{TOKENIZER_REVISION}/onnx_int8/tokenizer.model"
-            ),
-            &tokenizer,
-            TOKENIZER_SHA256,
-            &progress,
+    if !reuse_model {
+        progress(&format!("Installing {}", specification.label));
+        extract_model(
+            &model_archive,
+            &model,
+            specification.files,
+            specification.bytes,
         )?;
-        let vocabulary =
-            sentencepiece_vocabulary(&fs::read(tokenizer)?, &model.join("tokens.txt"))?;
-        fs::write(model.join("bpe.vocab"), vocabulary)?;
+        if specification.boosting {
+            let tokenizer = downloads.join("parakeet-unified-tokenizer.model");
+            download(
+                &client,
+                &format!(
+                    "https://huggingface.co/eschmidbauer/parakeet-unified-en-0.6b-onnx/resolve/{TOKENIZER_REVISION}/onnx_int8/tokenizer.model"
+                ),
+                &tokenizer,
+                TOKENIZER_SHA256,
+                &progress,
+            )?;
+            let vocabulary =
+                sentencepiece_vocabulary(&fs::read(tokenizer)?, &model.join("tokens.txt"))?;
+            fs::write(model.join("bpe.vocab"), vocabulary)?;
+        }
     }
 
-    let model_target = models.join(specification.name);
     let runtime_target = backend.join("parakeet");
     let server_target = runtime_target.join("recognizer");
     let model_path = model_target
@@ -544,7 +566,13 @@ pub fn install_variant(variant: &str, progress: impl Fn(&str)) -> Result<(String
         .to_str()
         .context("Speech runtime path is not UTF-8")?
         .to_owned();
-    activate(stage, &[(runtime, runtime_target), (model, model_target)])?;
+    let mut targets = vec![(runtime, runtime_target)];
+    if !reuse_model {
+        targets.push((model, model_target));
+    }
+    activate(stage, &targets)?;
+    // The verified archive is fully extracted; keeping it would double the model's disk use.
+    let _ = fs::remove_file(&model_archive);
     progress("Speech model ready");
     Ok((model_path, server_path))
 }
@@ -629,8 +657,20 @@ mod tests {
                 .unwrap();
         }
         builder.into_inner().unwrap().finish().unwrap();
-        extract_model(&archive, &root.path().join("valid"), MODEL_FILES, 4).unwrap();
-        assert!(!root.path().join("valid/bpe.vocab").exists());
+        let valid = root.path().join("valid");
+        extract_model(&archive, &valid, MODEL_FILES, 4).unwrap();
+        assert!(!valid.join("bpe.vocab").exists());
+        // A reinstall for a stale worker reuses an intact model instead of unpacking it again.
+        let mut installed = ModelSpec {
+            bytes: 4,
+            ..model_spec("low-memory").unwrap()
+        };
+        assert!(model_installed(&valid, &installed));
+        installed.boosting = true;
+        assert!(!model_installed(&valid, &installed));
+        installed.boosting = false;
+        fs::write(valid.join("tokens.txt"), b"").unwrap();
+        assert!(!model_installed(&valid, &installed));
         assert!(extract_model(&archive, &root.path().join("too-small"), MODEL_FILES, 3).is_err());
         assert!(extract_model(&archive, &root.path().join("too-large"), MODEL_FILES, 5).is_err());
     }
