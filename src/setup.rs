@@ -293,8 +293,24 @@ fn stage_worker(runtime: &Path, source: &Path) -> Result<()> {
         .as_file()
         .set_permissions(fs::Permissions::from_mode(0o700))?;
     let staged = staged.into_temp_path();
-    let probe = run_command(&mut Command::new(&staged), None, Duration::from_secs(3))
-        .context("Shipped Rust speech worker could not execute")?;
+    // A fork in another thread can briefly hold our write descriptor, so exec may report ETXTBSY.
+    let mut attempts = 0;
+    let probe = loop {
+        match run_command(&mut Command::new(&staged), None, Duration::from_secs(3)) {
+            Err(error)
+                if attempts < 20
+                    && error.chain().any(|cause| {
+                        cause
+                            .downcast_ref::<io::Error>()
+                            .is_some_and(|cause| cause.raw_os_error() == Some(libc::ETXTBSY))
+                    }) =>
+            {
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            result => break result.context("Shipped Rust speech worker could not execute")?,
+        }
+    };
     ensure!(
         probe.status.code() == Some(64),
         "Shipped Rust speech worker failed its executable check"
