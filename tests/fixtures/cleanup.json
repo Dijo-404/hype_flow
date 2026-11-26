@@ -323,6 +323,16 @@
     "output": "the net is down"
   },
   {
+    "input": "we use .NET , not Java .",
+    "settings": { "prompt": ".NET" },
+    "output": "we use .NET, not Java."
+  },
+  {
+    "input": "we use .NET and the net",
+    "settings": { "prompt": ".NET", "fuzzy_vocabulary": true },
+    "output": "we use .NET and the net"
+  },
+  {
     "input": "Main Rd and R and D",
     "settings": { "prompt": "R&D", "fuzzy_vocabulary": true },
     "output": "Main Rd and R&D"

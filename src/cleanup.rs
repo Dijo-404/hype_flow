@@ -42,7 +42,9 @@ static HORIZONTAL_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t]+
 static NOISE_TAGS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)<unk>|\[(?:blank_audio|silence|noise|music|inaudible|applause)\]").unwrap()
 });
-static PUNCTUATION_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" +([,.;:!?])").unwrap());
+// A full stop that starts a word (".NET", ".env") keeps the space before it.
+static PUNCTUATION_SPACES: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r" +([,;:!?]|\.(?![\p{L}\p{N}]))").unwrap());
 
 pub(crate) fn corrections(value: &str) -> Result<Vec<(String, String)>> {
     ensure!(
@@ -671,7 +673,9 @@ pub fn process_with_confidence(
             &segment[start + body.len()..]
         );
         let text = HORIZONTAL_SPACES.replace_all(&text, " ");
-        Ok(PUNCTUATION_SPACES.replace_all(&text, "$1").into_owned())
+        Ok(PUNCTUATION_SPACES
+            .try_replacen(&text, 0, "$1")?
+            .into_owned())
     };
 
     let mut result = String::with_capacity(text.len());
