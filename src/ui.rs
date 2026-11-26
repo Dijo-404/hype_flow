@@ -70,7 +70,6 @@ impl ShortcutCapture {
                 capture.cancel();
             }
         });
-        capture.cancel();
         capture
     }
 
@@ -816,6 +815,7 @@ impl Home {
         ] {
             let capture = ShortcutCapture::new(title, value);
             row(&shortcuts, title, detail, &capture.button);
+            // Label after row(), which sets the accessible name to the bare title.
             capture.cancel();
             controls.push((key.into(), Control::Shortcut(capture)));
         }
