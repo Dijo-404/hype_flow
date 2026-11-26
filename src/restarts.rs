@@ -172,6 +172,14 @@ fn find_restart(text: &str, toks: &[Tok]) -> Option<(usize, usize, Option<String
                 if len == 1 && repair_start - j > 2 {
                     continue;
                 }
+                // The reparandum must be a fragment: "The server crashed. The
+                // server restarted." is two sentences, "Kubernetes is." is not.
+                let fragment = toks[j + len..=i]
+                    .iter()
+                    .all(|t| t.stem.len() <= 2 || FUNCTION_WORDS.contains(&t.stem.as_str()));
+                if !fragment {
+                    continue;
+                }
                 // Never delete across a boundary that sits inside the
                 // reparandum: that would eat a whole prior sentence.
                 let crosses =
@@ -207,9 +215,16 @@ fn find_editing_phrase(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
             // It must open a sentence and be set off by punctuation, or it is
             // prose: "Don't scratch that surface.", "I'm sorry I missed it."
             let end_tok = start + words.len() - 1;
-            if !gap_is_sentence_boundary(text, &toks[start - 1], &toks[start])
-                || !text[toks[end_tok].end..].starts_with([',', ':', '.', '!', '?'])
-            {
+            let after = &text[toks[end_tok].end..];
+            let opens = if gap_is_sentence_boundary(text, &toks[start - 1], &toks[start]) {
+                after.starts_with([',', ':', '.', '!', '?'])
+            } else {
+                // An explicit command also works mid-sentence: "red, scratch that, blue".
+                matches!(*phrase, "scratch that" | "strike that")
+                    && gap_is_clause_break(text, &toks[start - 1], &toks[start])
+                    && after.starts_with([',', ';'])
+            };
+            if !opens {
                 continue;
             }
             // The retracted clause ends just before the phrase, so start the
@@ -253,7 +268,7 @@ fn find_editing_phrase(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
             let tail: &str = &text[cut_to..];
             let consumed: usize = tail
                 .char_indices()
-                .take_while(|(_, c)| c.is_whitespace() || *c == ',' || *c == ':')
+                .take_while(|(_, c)| c.is_whitespace() || matches!(c, ',' | ':' | ';'))
                 .map(|(i, c)| i + c.len_utf8())
                 .last()
                 .unwrap_or(0);
