@@ -88,7 +88,7 @@ struct Session {
 impl Session {
     fn new(on_frame: FrameCallback, on_end: EndCallback) -> Self {
         Self {
-            pcm: VecDeque::with_capacity(PCM_LIMIT),
+            pcm: VecDeque::new(),
             started: Instant::now(),
             received: false,
             ended: false,
@@ -132,8 +132,13 @@ impl Session {
             )
         {
             let piece = self.pcm.range(..cut).copied().collect();
-            if queue.sender.try_send(piece).is_ok() {
-                self.pcm.drain(..cut);
+            match queue.sender.try_send(piece) {
+                Ok(()) => {
+                    self.pcm.drain(..cut);
+                }
+                // The eager decoder has stopped, so stop copying pieces for it.
+                Err(mpsc::TrySendError::Disconnected(_)) => self.pieces = None,
+                Err(mpsc::TrySendError::Full(_)) => {}
             }
         }
 
@@ -637,4 +642,30 @@ pub fn release() {
         idle.capture.take()
     };
     drop(capture);
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    fn session() -> Session {
+        Session::new(Arc::new(|_, _| {}), Arc::new(|| {}))
+    }
+
+    #[test]
+    fn stopped_eager_decoder_stops_piece_copies_and_keeps_pcm() {
+        let mut session = session();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(receiver);
+        session.pieces = Some(PieceQueue {
+            sender,
+            maximum_seconds: 5,
+            ctc: false,
+        });
+        for _ in 0..7 * RATE * 2 / CHUNK {
+            session.feed(&[0; CHUNK]);
+        }
+        assert!(session.pieces.is_none());
+        assert_eq!(session.pcm.len(), 7 * RATE * 2);
+    }
 }
