@@ -1408,29 +1408,32 @@ impl Overlay {
 
     pub fn update(&self, phase: &str, message: &str, visible: bool, volume: f64, duration: f64) {
         let mut state = self.state.borrow_mut();
-        if state.phase != phase {
-            state.began = glib::monotonic_time();
-            state.levels = [0.0; 11];
-        }
-        state.phase = phase.into();
-        state.message = message.into();
         state.volume = volume;
         state.duration = duration;
-        state.target = if phase == "recording" {
-            114.0
-        } else if matches!(phase, "starting" | "transcribing" | "delivering") {
-            48.0
-        } else {
-            310.0
-        };
-        self.area
-            .update_property(&[gtk::accessible::Property::Label(message)]);
-        self.window.set_tooltip_text(Some(if phase == "recording" {
-            "Click to finish dictation. Right-click to cancel."
-        } else {
-            message
-        }));
-        self.window.set_visible(visible);
+        // Audio frames repeat the phase about 20 times a second; skip the accessibility churn.
+        if state.phase != phase || state.message != message || self.window.is_visible() != visible {
+            if state.phase != phase {
+                state.began = glib::monotonic_time();
+                state.levels = [0.0; 11];
+            }
+            state.phase = phase.into();
+            state.message = message.into();
+            state.target = if phase == "recording" {
+                114.0
+            } else if matches!(phase, "starting" | "transcribing" | "delivering") {
+                48.0
+            } else {
+                310.0
+            };
+            self.area
+                .update_property(&[gtk::accessible::Property::Label(message)]);
+            self.window.set_tooltip_text(Some(if phase == "recording" {
+                "Click to finish dictation. Right-click to cancel."
+            } else {
+                message
+            }));
+            self.window.set_visible(visible);
+        }
         let animating = visible && state.animating(animations());
         drop(state);
         self.area.queue_draw();
