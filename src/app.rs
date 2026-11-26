@@ -827,7 +827,7 @@ impl AppState {
                         if !spec.boosting {
                             values.vocabulary_boosting = false;
                         }
-                        values.model = model;
+                        values.model = model.clone();
                         values.server = server;
                         values.language = "en".into();
                         values.gpu = false;
@@ -835,6 +835,10 @@ impl AppState {
                             && let Some(home) = &self.home
                         {
                             home.saved(self.values.clone());
+                        }
+                        // Load the installed model now so a broken install fails here, not after a dictation.
+                        if self.values.model == model {
+                            self.warm();
                         }
                     }
                     Err(error) => self.publish("error", &format!("{error:#}"), false, 0.0, 0.0),
