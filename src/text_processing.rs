@@ -88,15 +88,30 @@ mod tests {
     }
     #[test]
     fn bounded_restart_port_preserves_prose_and_negation() {
-        assert_eq!(
-            crate::restarts::collapse_restarts("We need red. I mean, blue."),
-            "Blue."
-        );
+        for (text, expected) in [
+            ("We need red. I mean, blue.", "Blue."),
+            (
+                "Send the report to. Send the report to Alice.",
+                "Send the report to Alice.",
+            ),
+            (
+                "It runs after the model. I'm sorry, it runs before the model.",
+                "It runs before the model.",
+            ),
+            ("We need red. Scratch that. Blue.", "Blue."),
+        ] {
+            assert_eq!(crate::restarts::collapse_restarts(text), expected);
+        }
         for text in [
             "I like it. It is good.",
             "That is the plan. That is what we agreed.",
             "No no, I had had enough.",
             "I do not want to cancel.",
+            "Email Sarah. Sarah needs the file.",
+            "We need the database. The database is down.",
+            "Send it to Bob, I mean Alice.",
+            "Hi John. I'm sorry I missed your call.",
+            "Don't scratch that surface.",
         ] {
             assert_eq!(crate::restarts::collapse_restarts(text), text);
         }

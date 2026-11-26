@@ -162,6 +162,11 @@ fn find_restart(text: &str, toks: &[Tok]) -> Option<(usize, usize, Option<String
                 if !matches {
                     continue;
                 }
+                // The reparandum has to open a sentence too, or "Email Sarah.
+                // Sarah needs the file." loses "Sarah." as a restart.
+                if j > 0 && !gap_is_sentence_boundary(text, &toks[j - 1], &toks[j]) {
+                    continue;
+                }
                 // Never delete across a boundary that sits inside the
                 // reparandum: that would eat a whole prior sentence.
                 let crosses =
@@ -194,6 +199,14 @@ fn find_editing_phrase(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
             if start == 0 {
                 continue;
             }
+            // It must open a sentence and be set off by punctuation, or it is
+            // prose: "Don't scratch that surface.", "I'm sorry I missed it."
+            let end_tok = start + words.len() - 1;
+            if !gap_is_sentence_boundary(text, &toks[start - 1], &toks[start])
+                || !text[toks[end_tok].end..].starts_with([',', ':', '.', '!', '?'])
+            {
+                continue;
+            }
             // The retracted clause ends just before the phrase, so start the
             // walk there rather than at the phrase itself.
             let mut clause_start = start - 1;
@@ -211,7 +224,6 @@ fn find_editing_phrase(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
             if start - clause_start > MAX_REPARANDUM_TOKENS {
                 continue;
             }
-            let end_tok = start + words.len() - 1;
             // Swallow the phrase's trailing comma and spacing.
             let mut cut_to = toks[end_tok].end;
             let tail: &str = &text[cut_to..];
