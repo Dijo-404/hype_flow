@@ -273,6 +273,11 @@
     "output": "It costs five or ten dollars, between five and ten minutes."
   },
   {
+    "input": "Meet at three thirty. I need five or six minutes. I'll be there in two or three days.",
+    "settings": { "format_numbers": true },
+    "output": "Meet at three thirty. I need five or six minutes. I'll be there in two or three days."
+  },
+  {
     "input": "It was twenty twenty dollars.",
     "settings": { "format_numbers": true },
     "output": "It was twenty twenty dollars."
