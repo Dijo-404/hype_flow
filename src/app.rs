@@ -47,6 +47,7 @@ enum Event {
     Transcribed(u64, Result<Transcript>),
     Delivered(u64, Result<String>),
     Downloaded(String, Result<(String, String)>),
+    Saved(Box<Config>, Result<()>),
     Recovered(Result<usize>),
     Notice(String),
     Quit,
@@ -518,11 +519,21 @@ impl AppState {
         let shortcuts_changed = values.dictation_shortcut != self.values.dictation_shortcut
             || values.cancel_shortcut != self.values.cancel_shortcut
             || values.dictation_mode != self.values.dictation_mode;
-        let saved = if shortcuts_changed {
-            shortcuts::save(&values).map(|_| ())
-        } else {
-            values.save()
-        };
+        if shortcuts_changed {
+            // niri validation can take seconds; busy blocks dictation and saves until Saved.
+            self.session.busy = true;
+            let tx = self.tx.clone();
+            self.workers.push(thread::spawn(move || {
+                let saved = shortcuts::save(&values).map(|_| ());
+                let _ = tx.send_blocking(Event::Saved(Box::new(values), saved));
+            }));
+            return false;
+        }
+        let saved = values.save();
+        self.apply(values, saved, false)
+    }
+
+    fn apply(&mut self, values: Config, saved: Result<()>, shortcuts_changed: bool) -> bool {
         if let Err(error) = saved {
             if let Some(home) = &self.home {
                 home.feedback(&format!("{error:#}"));
@@ -787,6 +798,14 @@ impl AppState {
                         0.0,
                         0.0,
                     ),
+                }
+            }
+            Event::Saved(values, saved) => {
+                self.session.busy = false;
+                if self.apply(*values, saved, true)
+                    && let Some(home) = &self.home
+                {
+                    home.saved(self.values.clone());
                 }
             }
             Event::Downloaded(variant, result) => {
