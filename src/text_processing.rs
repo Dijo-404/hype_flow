@@ -99,6 +99,10 @@ mod tests {
                 "It runs before the model.",
             ),
             ("We need red. Scratch that. Blue.", "Blue."),
+            (
+                "Kubernetes is. Kubernetes clusters scale.",
+                "Kubernetes clusters scale.",
+            ),
         ] {
             assert_eq!(crate::restarts::collapse_restarts(text), expected);
         }
@@ -112,6 +116,8 @@ mod tests {
             "Send it to Bob, I mean Alice.",
             "Hi John. I'm sorry I missed your call.",
             "Don't scratch that surface.",
+            "Hi John. I'm sorry, I missed your call.",
+            "Paris is lovely. Paris has great food.",
         ] {
             assert_eq!(crate::restarts::collapse_restarts(text), text);
         }

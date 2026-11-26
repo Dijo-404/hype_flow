@@ -167,6 +167,11 @@ fn find_restart(text: &str, toks: &[Tok]) -> Option<(usize, usize, Option<String
                 if j > 0 && !gap_is_sentence_boundary(text, &toks[j - 1], &toks[j]) {
                     continue;
                 }
+                // A lone repeated word only restarts a short fragment: "Paris
+                // is lovely. Paris has great food." is two sentences.
+                if len == 1 && repair_start - j > 2 {
+                    continue;
+                }
                 // Never delete across a boundary that sits inside the
                 // reparandum: that would eat a whole prior sentence.
                 let crosses =
@@ -223,6 +228,25 @@ fn find_editing_phrase(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
             }
             if start - clause_start > MAX_REPARANDUM_TOKENS {
                 continue;
+            }
+            // "I'm sorry" is usually an apology, so it only retracts a clause
+            // whose content word the repair repeats.
+            if phrase.contains("sorry") {
+                let mut repair_end = (end_tok + 2).min(toks.len());
+                while repair_end < toks.len()
+                    && !gap_is_sentence_boundary(text, &toks[repair_end - 1], &toks[repair_end])
+                {
+                    repair_end += 1;
+                }
+                let repair = &toks[(end_tok + 1).min(toks.len())..repair_end];
+                let repeated = toks[clause_start..start].iter().any(|t| {
+                    t.stem.len() >= MIN_SINGLE_ANCHOR_LEN
+                        && !FUNCTION_WORDS.contains(&t.stem.as_str())
+                        && repair.iter().any(|r| r.stem == t.stem)
+                });
+                if !repeated {
+                    continue;
+                }
             }
             // Swallow the phrase's trailing comma and spacing.
             let mut cut_to = toks[end_tok].end;
