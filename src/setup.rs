@@ -108,7 +108,7 @@ pub fn model_files(model: &Path) -> &'static [&'static str] {
     }
 }
 
-pub const NATIVE_VERSION: &str = "8";
+pub const NATIVE_VERSION: &str = "9";
 const TOKENIZER_REVISION: &str = "7a16ff98b72e5b0beba6f182a5357c704d977b15";
 const TOKENIZER_SHA256: &str = "07d4e5a63840a53ab2d4d106d2874768143fb3fbdd47938b3910d2da05bfb0a9";
 const AUDIO_MODELS: &[(&str, &str, &str)] = &[
@@ -127,22 +127,24 @@ const AUDIO_MODELS: &[(&str, &str, &str)] = &[
 pub fn assets_ready(values: &Config) -> bool {
     let model = Path::new(&values.model);
     let server = Path::new(&values.server);
-    let ctc = variant_for_path(model) == "parakeet-ctc";
     server.is_file()
-        && fs::read_to_string(server.with_file_name("recognizer.version")).is_ok_and(|version| {
-            let version = version.trim();
-            version == NATIVE_VERSION || !ctc && matches!(version, "6" | "7")
-        })
+        && fs::read_to_string(server.with_file_name("recognizer.version"))
+            .is_ok_and(|version| version.trim() == NATIVE_VERSION)
         && model_files(model)
             .iter()
-            .all(|name| model.join(name).is_file())
+            .all(|name| non_empty(&model.join(name)))
         && (!(values.feature_dim == 128 || values.vocabulary_boosting)
             || model.join("bpe.vocab").is_file())
         && model.parent().is_some_and(|parent| {
             AUDIO_MODELS
                 .iter()
-                .all(|(name, _, _)| parent.join(name).is_file())
+                .all(|(name, _, _)| non_empty(&parent.join(name)))
         })
+}
+
+// An interrupted extraction can leave zero-length files that setup must repair.
+fn non_empty(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
 }
 
 fn checksum(path: &Path) -> Result<String> {
@@ -634,8 +636,14 @@ mod tests {
             ..Config::default()
         };
         assert!(assets_ready(&values));
-        fs::write(server.with_file_name("recognizer.version"), "6\n").unwrap();
-        assert!(assets_ready(&values));
+        // Older workers lack revision 9's memory savings, so setup must replace them.
+        fs::write(server.with_file_name("recognizer.version"), "8\n").unwrap();
+        assert!(!assets_ready(&values));
+        fs::write(server.with_file_name("recognizer.version"), NATIVE_VERSION).unwrap();
+        // A zero-length file left by an interrupted extraction is not ready.
+        fs::write(model.join(MODEL_FILES[0]), b"").unwrap();
+        assert!(!assets_ready(&values));
+        fs::write(model.join(MODEL_FILES[0]), b"fixture").unwrap();
         values.vocabulary_boosting = true;
         assert!(!assets_ready(&values));
         fs::write(model.join("bpe.vocab"), b"fixture").unwrap();
@@ -648,7 +656,6 @@ mod tests {
         }
         values.model = model.to_string_lossy().into_owned();
         values.vocabulary_boosting = false;
-        assert!(!assets_ready(&values));
         fs::write(server.with_file_name("recognizer.version"), "7\n").unwrap();
         assert!(!assets_ready(&values));
         fs::write(server.with_file_name("recognizer.version"), NATIVE_VERSION).unwrap();

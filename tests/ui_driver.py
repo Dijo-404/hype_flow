@@ -88,10 +88,10 @@ def main():
         for directory in (model, backend, config, fake):
             directory.mkdir(parents=True)
         for name in ("model.int8.onnx", "tokens.txt"):
-            (model / name).touch()
+            (model / name).write_bytes(b"0")
         for name in ("silero_vad.onnx", "gtcrn_simple.onnx"):
-            (model.parent / name).touch()
-        (backend / "recognizer.version").write_text("8\n")
+            (model.parent / name).write_bytes(b"0")
+        (backend / "recognizer.version").write_text("9\n")
         # The sandboxed worker cannot write host files, so it reports through its log.
         worker_log = Path(os.environ["XDG_RUNTIME_DIR"]) / "hype-flow/backend.log"
         worker_marker = f"fake worker started in {root}"

@@ -610,15 +610,15 @@ fn cached_worker_version_and_audio_assets_are_required() {
         ..Config::default()
     };
     for name in setup::MODEL_FILES.iter().copied().chain(["bpe.vocab"]) {
-        fs::write(model.join(name), []).unwrap();
+        fs::write(model.join(name), b"0").unwrap();
     }
     executable(&worker, "exit 0");
     let version = worker.with_file_name("recognizer.version");
     fs::write(&version, format!("{}\n", setup::NATIVE_VERSION)).unwrap();
     assert!(!setup::assets_ready(&values));
-    fs::write(model.parent().unwrap().join("silero_vad.onnx"), []).unwrap();
+    fs::write(model.parent().unwrap().join("silero_vad.onnx"), b"0").unwrap();
     assert!(!setup::assets_ready(&values));
-    fs::write(model.parent().unwrap().join("gtcrn_simple.onnx"), []).unwrap();
+    fs::write(model.parent().unwrap().join("gtcrn_simple.onnx"), b"0").unwrap();
     fs::write(&version, "3\n").unwrap();
     assert!(!setup::assets_ready(&values));
     fs::write(&version, format!("{}\n", setup::NATIVE_VERSION)).unwrap();
