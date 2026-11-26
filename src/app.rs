@@ -336,8 +336,11 @@ impl AppState {
                 if matches!(self.session.phase, "starting" | "recording") {
                     self.stop();
                 } else if self.session.busy {
-                    let last = self.last.clone();
-                    self.publish(last.0, &last.1, true, last.3, last.4);
+                    // Busy while idle is a shortcut save, which has no progress to show.
+                    if self.session.phase != "idle" {
+                        let last = self.last.clone();
+                        self.publish(last.0, &last.1, true, last.3, last.4);
+                    }
                 } else if !self.session.ready {
                     self.warm();
                 } else {
