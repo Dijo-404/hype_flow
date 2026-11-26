@@ -263,6 +263,26 @@
     "output": "Call 5551212."
   },
   {
+    "input": "It took two to three hours. It costs between five and ten dollars.",
+    "settings": { "format_numbers": true },
+    "output": "It took two to three hours. It costs between five and ten dollars."
+  },
+  {
+    "input": "It costs five or ten dollars, between five and ten minutes.",
+    "settings": { "format_numbers": true },
+    "output": "It costs five or ten dollars, between five and ten minutes."
+  },
+  {
+    "input": "It was twenty twenty dollars.",
+    "settings": { "format_numbers": true },
+    "output": "It was twenty twenty dollars."
+  },
+  {
+    "input": "a hundred and twenty days",
+    "settings": { "format_numbers": true },
+    "output": "120 days"
+  },
+  {
     "input": "email pete@example.com it costs twenty five dollars",
     "settings": { "format_numbers": true },
     "output": "email pete@example.com it costs $25"
