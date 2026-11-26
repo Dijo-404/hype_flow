@@ -4,8 +4,10 @@ use hype_flow::config::Config;
 use hype_flow::process::run_command;
 use hype_flow::setup::MODEL_FILES;
 use std::fs;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::net::UnixDatagram;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, mpsc};
@@ -29,6 +31,20 @@ fn wait_for_file(path: &Path) -> String {
         assert!(Instant::now() < deadline, "{}", path.display());
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn events(temp: &TempDir) -> UnixDatagram {
+    let events = UnixDatagram::bind(temp.path().join("events")).unwrap();
+    events
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    events
+}
+
+fn event(events: &UnixDatagram) -> String {
+    let mut buffer = [0; 4096];
+    let length = events.recv(&mut buffer).unwrap();
+    String::from_utf8_lossy(&buffer[..length]).into_owned()
 }
 
 fn worker_is_running(path: &Path) -> bool {
@@ -162,8 +178,12 @@ fn fake_engine(script: &str) -> (TempDir, Engine) {
 }
 
 const WORKER_SETUP: &str = r#"
-import json, os, pathlib, struct, sys, time
+import json, os, pathlib, socket, struct, sys, time
 root = pathlib.Path(sys.argv[1]).parent
+def event(text):
+    # The sandbox makes files read-only, so report to the test over a socket.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as channel:
+        channel.sendto(text.encode(), str(root / 'events'))
 def send(value):
     body = json.dumps(value).encode()
     for part in (struct.pack('<I', len(body))[:2], struct.pack('<I', len(body))[2:], body[:3], body[3:]):
@@ -184,8 +204,7 @@ fn worker_load_is_shared_and_pcm_framing_handles_partial_transfers() {
     let script = format!(
         "{WORKER_SETUP}\n{}",
         r#"
-with (root / 'starts').open('a') as starts:
-    starts.write('started\n')
+event('started')
 send({'ready': True})
 while (payload := read_pcm()) is not None:
     assert payload == b'\x34\x12' * 130000
@@ -193,15 +212,18 @@ while (payload := read_pcm()) is not None:
 "#
     );
     let (temp, engine) = fake_engine(&script);
+    let events = events(&temp);
     thread::scope(|scope| {
         let first = scope.spawn(|| engine.ensure());
         let second = scope.spawn(|| engine.ensure());
         first.join().unwrap().unwrap();
         second.join().unwrap().unwrap();
     });
+    assert_eq!(event(&events), "started");
+    events.set_nonblocking(true).unwrap();
     assert_eq!(
-        fs::read_to_string(temp.path().join("starts")).unwrap(),
-        "started\n"
+        events.recv(&mut [0]).unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
     );
     assert_eq!(
         engine.transcribe(&[0x34, 0x12].repeat(130000)).unwrap(),
@@ -224,24 +246,22 @@ fn detailed_transcription_keeps_duration_of_skipped_silent_tail() {
 send({'ready': True})
 while (payload := read_pcm()) is not None:
     assert any(payload)
-    with (root / 'requests').open('a') as requests:
-        requests.write(str(len(payload) // 32000) + '\n')
+    event(str(len(payload) // 32000))
     send({'text': 'speech', 'tokens': [' speech'], 'timestamps': [0.0],
           'durations': [1.0], 'ys_log_probs': [-0.1]})
 "#
     );
     let (temp, engine) = fake_engine(&script);
+    let events = events(&temp);
     engine.ensure().unwrap();
     let mut pcm = [1, 0].repeat(15 * RATE);
     pcm.resize(35 * RATE * 2, 0);
     let mut transcript = engine.transcribe_detailed(&pcm).unwrap();
     assert_eq!(transcript.text, "speech");
     assert_eq!(transcript.audio_seconds, 35.0);
-    assert_eq!(
-        fs::read_to_string(temp.path().join("requests")).unwrap(),
-        "15\n"
-    );
+    assert_eq!(event(&events), "15");
     let next = engine.transcribe_detailed(&[1, 0].repeat(RATE)).unwrap();
+    assert_eq!(event(&events), "1");
     transcript.append(next, transcript.audio_seconds);
     assert_eq!(transcript.audio_seconds, 36.0);
     assert_eq!(transcript.words[1].start_seconds, 35.0);
@@ -303,7 +323,7 @@ assert hotwords.read_text() == 'Niri\nniri'
 assert hotwords.stat().st_mode & 0o777 == 0o600
 assert args[13:] == ['1.8', '--vad', str(root / 'silero_vad.onnx'),
                         '--denoise', str(root / 'gtcrn_simple.onnx')]
-(root / 'hotwords-path').write_text(str(hotwords))
+event(str(hotwords))
 send({'ready': True})
 read_pcm()
 "#
@@ -320,14 +340,59 @@ read_pcm()
         fs::write(temp.path().join(file), "fixture").unwrap();
     }
     let engine = Engine::new(config, temp.path().to_owned());
+    let events = events(&temp);
     engine.ensure().unwrap_or_else(|error| {
         let log = fs::read_to_string(temp.path().join("backend.log")).unwrap_or_default();
         panic!("{error:#}\n{log}");
     });
-    let hotwords = wait_for_file(&temp.path().join("hotwords-path"));
+    let hotwords = event(&events);
     assert!(Path::new(&hotwords).is_file());
     engine.stop();
     assert!(!Path::new(&hotwords).exists());
+}
+
+#[test]
+fn sandboxed_worker_cannot_write_files_or_reach_session_sockets() {
+    let outside = TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let hidden = TempDir::new().unwrap();
+    let script = format!(
+        "{WORKER_SETUP}\noutside, hidden = {:?}, {:?}\n{}",
+        outside.path().join("escape"),
+        hidden.path(),
+        r#"
+import errno
+def attempt(path):
+    try:
+        pathlib.Path(path).write_text('escaped')
+        return 'written'
+    except OSError as error:
+        return errno.errorcode[error.errno]
+shared = os.environ.get('XDG_RUNTIME_DIR', '')
+print('worker log is writable', file=sys.stderr, flush=True)
+event(json.dumps({
+    'runtime': attempt(root / 'escape'),
+    'outside': attempt(outside),
+    'hidden': os.path.exists(hidden),
+    'shared': os.listdir(shared) if os.path.isabs(shared) and os.path.isdir(shared) else [],
+}))
+send({'ready': True})
+read_pcm()
+"#
+    );
+    let (temp, engine) = fake_engine(&script);
+    let events = events(&temp);
+    engine.ensure().unwrap();
+    let report: serde_json::Value = serde_json::from_str(&event(&events)).unwrap();
+    let log = fs::read_to_string(temp.path().join("backend.log")).unwrap();
+    assert!(log.contains("worker log is writable"), "{log}");
+    if !log.contains("bubblewrap") {
+        eprintln!("bubblewrap is unavailable; sandbox checks skipped");
+        return;
+    }
+    assert_eq!(
+        report,
+        serde_json::json!({"runtime": "EROFS", "outside": "EROFS", "hidden": false, "shared": []})
+    );
 }
 
 #[test]
@@ -367,9 +432,7 @@ fn cancellation_of_blocked_worker_io_reaps_worker_and_allows_restart() {
         let script = format!(
             "{WORKER_SETUP}\n{}",
             r#"
-first = not (root / 'first-pid').exists()
-if first:
-    (root / 'first-pid').write_text(str(os.getpid()))
+first = not (root / 'restarted').exists()
 send({'ready': True})
 if first:
     READ_REQUEST
@@ -382,7 +445,7 @@ else:
         );
         let (temp, engine) = fake_engine(&script);
         engine.ensure().unwrap();
-        wait_for_file(&temp.path().join("first-pid"));
+        fs::write(temp.path().join("restarted"), "").unwrap();
         let worker = temp.path().join("worker");
         assert!(worker_is_running(&worker));
         let engine = Arc::new(engine);
@@ -413,12 +476,13 @@ else:
 #[test]
 fn cancelled_startup_during_handshake_reaps_worker() {
     let (temp, engine) = fake_engine(&format!(
-        "{WORKER_SETUP}\n(root / 'startup').write_text('started')\ntime.sleep(60)\n"
+        "{WORKER_SETUP}\nevent('started')\ntime.sleep(60)\n"
     ));
+    let events = events(&temp);
     let worker = temp.path().join("worker");
     thread::scope(|scope| {
         let startup = scope.spawn(|| engine.ensure());
-        wait_for_file(&temp.path().join("startup"));
+        assert_eq!(event(&events), "started");
         assert!(worker_is_running(&worker));
         let start = Instant::now();
         engine.stop();
@@ -433,9 +497,8 @@ fn background_stop_keeps_a_restarted_worker_running() {
     let script = format!(
         "{WORKER_SETUP}\n{}",
         r#"
-first = not (root / 'starting').exists()
-if first:
-    (root / 'starting').write_text('started')
+if not (root / 'restarted').exists():
+    event('starting')
     time.sleep(60)
 else:
     send({'ready': True})
@@ -444,10 +507,12 @@ else:
 "#
     );
     let (temp, engine) = fake_engine(&script);
+    let events = events(&temp);
     let engine = Arc::new(engine);
     thread::scope(|scope| {
         let startup = scope.spawn(|| engine.ensure());
-        wait_for_file(&temp.path().join("starting"));
+        assert_eq!(event(&events), "starting");
+        fs::write(temp.path().join("restarted"), "").unwrap();
         engine.stop_in_background();
         engine.prepare();
         engine.ensure().unwrap();
