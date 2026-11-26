@@ -169,7 +169,7 @@ impl AppState {
         if changed && let Some(home) = &self.home {
             home.update(phase, message, setup::assets_ready(&self.values));
         }
-        if !matches!(phase, "idle" | "done") {
+        if !matches!(phase, "idle" | "done" | "error") {
             if let Some(timer) = self.unloading.take() {
                 timer.remove();
             }
@@ -189,7 +189,7 @@ impl AppState {
                     if let Some(app) = weak.upgrade() {
                         let mut app = app.borrow_mut();
                         app.unloading.take();
-                        if matches!(app.session.phase, "idle" | "done")
+                        if matches!(app.session.phase, "idle" | "done" | "error")
                             && !app.session.busy
                             && app.recorder.is_none()
                         {
