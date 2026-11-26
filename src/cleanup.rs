@@ -575,6 +575,16 @@ pub fn process_with_confidence(
         filters,
     } = &*compiled;
     let fuzzy = values.fuzzy_vocabulary.then(|| fuzzy_keys(&vocabulary));
+    let preserve = |matched: &str| {
+        let word = matched.trim_matches([' ', ',', ';', ':']);
+        let mut uppercase = false;
+        word.chars().all(|character| {
+            uppercase |= character.is_uppercase();
+            !character.is_lowercase() && !matches_char(&TITLECASE, character)
+        }) && uppercase
+            && word.chars().count() > 1
+            && !blocked.iter().any(|item| item == word)
+    };
     let mut removed = false;
     let mut plain = |segment: &str| -> Result<String> {
         // Stages that rebuild text from words drop the spaces joining it to a protected span.
@@ -588,25 +598,36 @@ pub fn process_with_confidence(
         if values.spoken_commands {
             text = crate::text_processing::spoken_punctuation(&text);
         }
-        // Drop fillers before number grammars, or "twenty um five" reads as two numbers.
-        if let Some(filters) = &filters {
-            text = edit_matches(&text, filters, |matched, output| {
-                let word = matched.trim_matches([' ', ',', ';', ':']);
-                let mut uppercase = false;
-                let preserve = word.chars().all(|character| {
-                    uppercase |= character.is_uppercase();
-                    !character.is_lowercase() && !matches_char(&TITLECASE, character)
-                }) && uppercase
-                    && word.chars().count() > 1
-                    && !blocked.iter().any(|item| item == word);
-                if preserve {
-                    output.push_str(matched);
-                } else {
+        // Drop a filler between number words first, or "twenty um five" reads as two
+        // numbers. Other fillers wait, so corrections such as "uh huh => yes" still match.
+        if values.format_numbers
+            && let Some(filters) = &filters
+        {
+            let number = |word: Option<&str>| {
+                word.is_some_and(|word| {
+                    crate::itn::number_words().contains(
+                        word.trim_matches(|character: char| !character.is_alphanumeric())
+                            .to_lowercase()
+                            .as_str(),
+                    )
+                })
+            };
+            let mut kept = String::with_capacity(text.len());
+            let mut end = 0;
+            for matched in filters.find_iter(&text) {
+                let matched = matched?;
+                if number(text[..matched.start()].split_whitespace().next_back())
+                    && number(text[matched.end()..].split_whitespace().next())
+                    && !preserve(matched.as_str())
+                {
+                    kept.push_str(&text[end..matched.start()]);
+                    kept.push(' ');
+                    end = matched.end();
                     removed = true;
-                    output.push(' ');
                 }
-                Ok(())
-            })?;
+            }
+            kept.push_str(&text[end..]);
+            text = kept;
         }
         if values.format_numbers {
             text = crate::itn::apply(&text);
@@ -629,6 +650,17 @@ pub fn process_with_confidence(
         }
         if values.spoken_commands {
             text = crate::text_processing::spoken_punctuation(&text);
+        }
+        if let Some(filters) = &filters {
+            text = edit_matches(&text, filters, |matched, output| {
+                if preserve(matched) {
+                    output.push_str(matched);
+                } else {
+                    removed = true;
+                    output.push(' ');
+                }
+                Ok(())
+            })?;
         }
         if values.remove_repetitions {
             text = remove_repetitions(&text)?;

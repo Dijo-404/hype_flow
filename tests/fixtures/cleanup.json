@@ -338,6 +338,11 @@
     "output": "$25"
   },
   {
+    "input": "uh huh, sure",
+    "settings": { "corrections": "uh huh => yes", "format_numbers": true },
+    "output": "yes, sure"
+  },
+  {
     "input": "lınux rocks",
     "settings": { "prompt": "Linux" },
     "output": "lınux rocks"
