@@ -587,6 +587,26 @@ pub fn process_with_confidence(
         if values.spoken_commands {
             text = crate::text_processing::spoken_punctuation(&text);
         }
+        // Drop fillers before number grammars, or "twenty um five" reads as two numbers.
+        if let Some(filters) = &filters {
+            text = edit_matches(&text, filters, |matched, output| {
+                let word = matched.trim_matches([' ', ',', ';', ':']);
+                let mut uppercase = false;
+                let preserve = word.chars().all(|character| {
+                    uppercase |= character.is_uppercase();
+                    !character.is_lowercase() && !matches_char(&TITLECASE, character)
+                }) && uppercase
+                    && word.chars().count() > 1
+                    && !blocked.iter().any(|item| item == word);
+                if preserve {
+                    output.push_str(matched);
+                } else {
+                    removed = true;
+                    output.push(' ');
+                }
+                Ok(())
+            })?;
+        }
         if values.format_numbers {
             text = crate::itn::apply(&text);
         }
@@ -608,25 +628,6 @@ pub fn process_with_confidence(
         }
         if values.spoken_commands {
             text = crate::text_processing::spoken_punctuation(&text);
-        }
-        if let Some(filters) = &filters {
-            text = edit_matches(&text, filters, |matched, output| {
-                let word = matched.trim_matches([' ', ',', ';', ':']);
-                let mut uppercase = false;
-                let preserve = word.chars().all(|character| {
-                    uppercase |= character.is_uppercase();
-                    !character.is_lowercase() && !matches_char(&TITLECASE, character)
-                }) && uppercase
-                    && word.chars().count() > 1
-                    && !blocked.iter().any(|item| item == word);
-                if preserve {
-                    output.push_str(matched);
-                } else {
-                    removed = true;
-                    output.push(' ');
-                }
-                Ok(())
-            })?;
         }
         if values.remove_repetitions {
             text = remove_repetitions(&text)?;

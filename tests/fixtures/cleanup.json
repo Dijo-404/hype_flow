@@ -306,5 +306,15 @@
     "input": "Main Rd and R and D",
     "settings": { "prompt": "R&D", "fuzzy_vocabulary": true },
     "output": "Main Rd and R&D"
+  },
+  {
+    "input": "it costs twenty um five dollars",
+    "settings": { "format_numbers": true },
+    "output": "it costs $25"
+  },
+  {
+    "input": "twenty, um, five dollars",
+    "settings": { "format_numbers": true },
+    "output": "$25"
   }
 ]
