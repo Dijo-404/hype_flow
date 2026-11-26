@@ -276,5 +276,15 @@
     "input": "run `ls` We need red. I mean, blue.",
     "settings": { "remove_restarts": true },
     "output": "run `ls` Blue."
+  },
+  {
+    "input": "call five five five one two one two, the code is 7 7 3, bye bye",
+    "settings": { "remove_repetitions": true },
+    "output": "call five five five one two one two, the code is 7 7 3, bye bye"
+  },
+  {
+    "input": "call nine one one, the code is 7 7 3, bye bye",
+    "settings": { "remove_restarts": true },
+    "output": "call nine one one, the code is 7 7 3, bye bye"
   }
 ]

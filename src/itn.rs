@@ -110,7 +110,7 @@ fn set_of(words: &'static [&'static str]) -> HashSet<&'static str> {
     words.iter().copied().collect()
 }
 
-fn number_words() -> &'static HashSet<&'static str> {
+pub(crate) fn number_words() -> &'static HashSet<&'static str> {
     static S: OnceLock<HashSet<&'static str>> = OnceLock::new();
     S.get_or_init(|| set_of(NUMBER_WORDS))
 }

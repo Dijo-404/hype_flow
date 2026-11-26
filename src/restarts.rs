@@ -31,7 +31,15 @@ const FUNCTION_WORDS: &[&str] = &[
 ];
 
 /// Adjacent repeats that are ordinary English rather than a stutter.
-const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so"];
+const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so", "bye"];
+
+/// Whether a lower-case word may repeat back to back. Dictated digits
+/// repeat too: "nine one one", "7 7 3".
+pub(crate) fn legitimate_double(word: &str) -> bool {
+    LEGITIMATE_DOUBLES.contains(&word)
+        || crate::itn::number_words().contains(word)
+        || word.chars().all(char::is_numeric)
+}
 
 /// Editing phrases that explicitly mark the preceding clause as retracted.
 /// Ordered longest-first so "i am sorry" wins over "sorry".
@@ -238,7 +246,7 @@ fn collapse_adjacent(text: &str, toks: &[Tok]) -> Option<(usize, usize)> {
     for i in 0..toks.len().saturating_sub(1) {
         let a = &toks[i];
         let b = &toks[i + 1];
-        if a.lower != b.lower || LEGITIMATE_DOUBLES.contains(&a.lower.as_str()) {
+        if a.lower != b.lower || legitimate_double(&a.lower) {
             continue;
         }
         // Only a bare space may separate a stutter; punctuation means the

@@ -12,7 +12,6 @@ use crate::vocabulary::{
 
 static COMMON_WORDS: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| include_str!("../assets/common_words.txt").lines().collect());
-const LEGITIMATE_DOUBLES: &[&str] = &["had", "that", "very", "no", "yes", "ha", "so"];
 
 pub const DEFAULT_FILTERS: &str = "um, uh, erm, umm, uhh";
 
@@ -414,7 +413,7 @@ fn remove_repetitions(text: &str) -> Result<String> {
         let captures = captures?;
         let repetition = captures.get(0).unwrap();
         let first_word = captures.get(1).unwrap();
-        if LEGITIMATE_DOUBLES.contains(&first_word.as_str()) {
+        if crate::restarts::legitimate_double(first_word.as_str()) {
             continue;
         }
         output.push_str(&text[end..offsets[repetition.start()]]);
@@ -436,7 +435,7 @@ fn vocabulary_echo(text: &str, vocabulary: &[(String, String)]) -> bool {
     }
     if vocabulary.iter().any(|(_, term)| {
         let term = key(term);
-        !LEGITIMATE_DOUBLES.contains(&term.as_str())
+        !crate::restarts::legitimate_double(&term)
             && words.iter().filter(|word| **word == term).count() >= 3
             && words.iter().filter(|word| **word == term).count() * 4 >= words.len() * 3
     }) {
