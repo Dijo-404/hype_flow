@@ -27,6 +27,7 @@ static SANDBOX_WORKS: AtomicBool = AtomicBool::new(false);
 
 fn bubblewrap(reads: &[&Path]) -> Command {
     let mut command = Command::new("bwrap");
+    // /run holds system path sockets (Docker, system bus) that a read-only mount still connects to.
     command.args([
         "--unshare-net",
         "--unshare-pid",
@@ -39,6 +40,8 @@ fn bubblewrap(reads: &[&Path]) -> Command {
         "/proc",
         "--tmpfs",
         "/tmp",
+        "--tmpfs",
+        "/run",
     ]);
     // Path sockets such as the session bus still connect across a network namespace.
     let shared = env::var_os("XDG_RUNTIME_DIR")
@@ -48,11 +51,12 @@ fn bubblewrap(reads: &[&Path]) -> Command {
         command.arg("--tmpfs").arg(shared);
     }
     // Later mounts win: re-expose what the recognizer reads, never a hidden root itself.
+    let hidden = [Path::new("/tmp"), Path::new("/run")];
     for path in reads {
-        if !Path::new("/tmp").starts_with(path)
-            && shared
-                .as_ref()
-                .is_none_or(|shared| !shared.starts_with(path))
+        if !hidden
+            .into_iter()
+            .chain(shared.as_deref())
+            .any(|root| root.starts_with(path))
         {
             command.arg("--ro-bind").arg(path).arg(path);
         }

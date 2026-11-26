@@ -374,6 +374,7 @@ event(json.dumps({
     'outside': attempt(outside),
     'hidden': os.path.exists(hidden),
     'shared': os.listdir(shared) if os.path.isabs(shared) and os.path.isdir(shared) else [],
+    'system': [path for path in ('/run/dbus/system_bus_socket', '/run/docker.sock') if os.path.exists(path)],
 }))
 send({'ready': True})
 read_pcm()
@@ -391,7 +392,7 @@ read_pcm()
     }
     assert_eq!(
         report,
-        serde_json::json!({"runtime": "EROFS", "outside": "EROFS", "hidden": false, "shared": []})
+        serde_json::json!({"runtime": "EROFS", "outside": "EROFS", "hidden": false, "shared": [], "system": []})
     );
 }
 
