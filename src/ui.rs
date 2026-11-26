@@ -587,7 +587,11 @@ impl Home {
             row(group, title, detail, &switch);
             controls.push((key.to_string(), Control::Switch(switch)));
         }
-        let sources = input_choices(Vec::new(), &[&values.input_target]);
+        let mut sources = input_choices(Vec::new(), &[]);
+        if values.input_target != "auto" {
+            // Bare id until the refresh on show knows whether the device is plugged in.
+            sources.push((values.input_target.clone(), values.input_target.clone()));
+        }
         for (key, title, detail, choices, group) in [
             (
                 "model_variant",
