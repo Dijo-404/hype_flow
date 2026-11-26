@@ -280,11 +280,12 @@ impl AppState {
                     self.show();
                     return;
                 }
-                if !matches!(self.session.phase, "starting" | "recording")
-                    && !self.session.busy
-                    && self.session.ready
-                {
-                    self.start();
+                if !matches!(self.session.phase, "starting" | "recording") && !self.session.busy {
+                    if self.session.ready {
+                        self.start();
+                    } else {
+                        self.warm();
+                    }
                 }
             }
             "release" => {
@@ -641,7 +642,7 @@ impl AppState {
                 match result {
                     Ok(()) => self.publish("idle", "Ready", false, 0.0, 0.0),
                     Err(error) => {
-                        self.engine.stop();
+                        self.workers.push(self.engine.stop_in_background());
                         self.publish("error", &format!("{error:#}"), true, 0.0, 0.0);
                     }
                 }
@@ -700,8 +701,8 @@ impl AppState {
                 self.session.busy = false;
                 match result {
                     Err(error) => {
-                        self.session.ready = false;
-                        self.engine.stop();
+                        self.session.fail();
+                        self.workers.push(self.engine.stop_in_background());
                         self.publish("error", &format!("{error:#}"), true, 0.0, 0.0);
                     }
                     Ok((raw, text, note, silent)) => {
