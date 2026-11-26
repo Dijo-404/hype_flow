@@ -126,6 +126,8 @@ unsafe extern "C" fn SherpaOnnxGetOfflineStreamResult(
             assert_eq!(samples.len(), 20_000);
             "{\"text\":\"recovered\"}".to_owned()
         }
+    } else if mode("multi-piece") {
+        format!("{{\"text\":\"{}\",\"timestamps\":[0.5]}}", samples.len())
     } else if mode("oversize-result") {
         "x".repeat(1_048_577)
     } else if samples.len() > 3 {
@@ -171,9 +173,10 @@ unsafe extern "C" fn SherpaOnnxCreateVoiceActivityDetector(
     assert_eq!(silero.min_silence_duration, 0.45);
     assert_eq!(silero.min_speech_duration, 0.06);
     assert_eq!(silero.window_size, 512);
-    // The worker's default 20-second piece bounds speech and the VAD buffer.
-    assert_eq!(silero.max_speech_duration, 20.0);
-    assert_eq!(buffer_seconds, 25.0);
+    // The piece limit (worker default 20 seconds) bounds speech and the VAD buffer.
+    let piece = if mode("multi-piece") { 5.0 } else { 20.0 };
+    assert_eq!(silero.max_speech_duration, piece);
+    assert_eq!(buffer_seconds, piece + 5.0);
     handle()
 }
 
@@ -197,6 +200,8 @@ unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorAcceptWaveform(
     } else if mode("fallback") {
         assert_eq!(n, 3);
         assert_eq!(*samples, -1.0);
+    } else if mode("multi-piece") {
+        assert_eq!(n, 512);
     } else {
         assert_eq!(n, if offset == 39 { 32 } else { 512 });
         assert_eq!(*samples, (offset * 512) as f32 / 65536.0);
@@ -222,6 +227,9 @@ unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorFront(
     let first = SEGMENTS.load(Relaxed) == 2;
     let (start, n) = if mode("ctc-pause") {
         if first { (8_000, 500) } else { (19_800, 100) }
+    } else if mode("multi-piece") {
+        // The first padded range ends where a 0.1 s split window starts.
+        if first { (16_000, 47_200) } else { (80_000, 40_000) }
     } else if first {
         (10_000, 500)
     } else {
@@ -256,6 +264,9 @@ unsafe extern "C" fn SherpaOnnxVoiceActivityDetectorFlush(
         assert_eq!(WINDOWS.load(Relaxed), 4);
     } else if mode("fallback") {
         assert_eq!(WINDOWS.load(Relaxed), 1);
+    } else if mode("multi-piece") {
+        assert_eq!(WINDOWS.load(Relaxed), 250);
+        SEGMENTS.store(2, Relaxed);
     } else {
         assert_eq!(WINDOWS.load(Relaxed), 40);
         SEGMENTS.store(2, Relaxed);
