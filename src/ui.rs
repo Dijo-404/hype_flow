@@ -347,7 +347,7 @@ impl Home {
         let handle = gtk::WindowHandle::new();
         handle.set_child(Some(&lights));
         sidebar.append(&handle);
-        let brand = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let brand = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         brand.add_css_class("brand");
         let bytes = glib::Bytes::from_static(include_bytes!("../assets/logo.svg"));
         let icon = gdk::Texture::from_bytes(&bytes).ok();
@@ -373,10 +373,12 @@ impl Home {
             content.append(&text);
             let item = gtk::ListBoxRow::new();
             item.set_tooltip_text(Some(title));
+            // Labels say the same in the wide layout; resize_layout turns tooltips on when compact.
+            item.set_has_tooltip(false);
             item.set_child(Some(&content));
             navigation.append(&item);
         }
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.set_widget_name("settings-content");
         content.set_hexpand(true);
         shell.append(&content);
@@ -395,14 +397,14 @@ impl Home {
         content.append(&header);
         let stack = gtk::Stack::builder()
             .transition_type(gtk::StackTransitionType::Crossfade)
-            .transition_duration(220)
+            .transition_duration(120)
             .vexpand(true)
             .build();
         content.append(&stack);
         let pages: Vec<gtk::Box> = PAGES
             .iter()
             .map(|(name, _, _)| {
-                let page = gtk::Box::new(gtk::Orientation::Vertical, 10);
+                let page = gtk::Box::new(gtk::Orientation::Vertical, 8);
                 page.add_css_class("settings-page");
                 let scroll = gtk::ScrolledWindow::builder()
                     .hscrollbar_policy(gtk::PolicyType::Never)
@@ -429,6 +431,7 @@ impl Home {
         transcription.append(&model_summary);
         let download_button = gtk::Button::with_label("Install selected model");
         download_button.set_halign(gtk::Align::End);
+        download_button.set_valign(gtk::Align::Center);
         {
             let action = action.clone();
             download_button.connect_clicked(move |_| action("download"));
@@ -667,6 +670,9 @@ impl Home {
                     .unwrap_or(0) as u32,
             );
             let item = row(group, title, detail, &dropdown);
+            if key == "model_variant" {
+                item.append(&download_button);
+            }
             rows.push((item, dropdown.clone().upcast()));
             controls.push((
                 key.to_string(),
@@ -676,16 +682,12 @@ impl Home {
                 ),
             ));
         }
-        let model_actions = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        model_actions.add_css_class("panel-body");
-        model_actions.append(&download_button);
-        transcription.append(&model_actions);
         let prompt = gtk::Entry::builder()
             .text(&values.prompt)
             .placeholder_text("niri, Hype Flow, project names…")
             .hexpand(true)
             .build();
-        let vocabulary_body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let vocabulary_body = gtk::Box::new(gtk::Orientation::Vertical, 3);
         vocabulary_body.add_css_class("panel-body");
         let prompt_title = "Names and specialist terms";
         vocabulary_body.append(&label(prompt_title, "row-title"));
@@ -755,7 +757,7 @@ impl Home {
                 .build();
             scroll.add_css_class("text-editor");
             body.append(&scroll);
-            group.append(&body);
+            group.insert_child_after(&body, group.first_child().as_ref());
             controls.push((key.to_string(), Control::Text(editor.buffer())));
         }
         let transcript = section(&pages[0], "Last transcript");
@@ -791,7 +793,13 @@ impl Home {
                 "clear-recordings",
             ),
         ] {
-            let button = gtk::Button::with_label(button_label);
+            let button = gtk::Button::builder()
+                .label(button_label)
+                .width_request(184)
+                .build();
+            if name == "clear-recordings" {
+                button.add_css_class("destructive-action");
+            }
             let action = action.clone();
             button.connect_clicked(move |_| action(name));
             row(&transcript, title, detail, &button);
@@ -825,7 +833,10 @@ impl Home {
         }
         pages[4].append(&label("Click a shortcut, then press the keys you want. Escape cancels. Use Save changes to apply; existing bindings are checked first.", "muted"));
         let integration = section(&pages[4], "niri integration");
-        let configure = gtk::Button::with_label("Configure niri");
+        let configure = gtk::Button::builder()
+            .label("Configure niri")
+            .width_request(184)
+            .build();
         {
             let action = action.clone();
             configure.connect_clicked(move |_| action("shortcuts"));
@@ -883,6 +894,7 @@ impl Home {
             if let Some(home) = weak.upgrade() {
                 home.save_button.set_sensitive(true);
                 home.save_button.set_label("Save changes");
+                home.save_button.remove_css_class("saved");
             }
         });
         for (key, control) in &home.controls {
@@ -1053,6 +1065,16 @@ impl Home {
         });
         for label in &self.navigation_labels {
             label.set_visible(!compact);
+            if let Some(parent) = label.parent() {
+                parent.set_halign(if compact {
+                    gtk::Align::Center
+                } else {
+                    gtk::Align::Fill
+                });
+            }
+            if let Some(row) = label.ancestor(gtk::ListBoxRow::static_type()) {
+                row.set_has_tooltip(compact);
+            }
         }
         for (row, control) in &self.rows {
             row.set_orientation(if compact {
@@ -1075,16 +1097,19 @@ impl Home {
         if !self.changes().is_ok_and(|draft| draft == values) {
             self.save_button.set_sensitive(true);
             self.save_button.set_label("Save changes");
+            self.save_button.remove_css_class("saved");
             return;
         }
         self.save_button.set_sensitive(false);
         self.save_button.set_label("Saved");
+        self.save_button.add_css_class("saved");
         let weak = Rc::downgrade(self);
         glib::timeout_add_local_once(std::time::Duration::from_millis(1600), move || {
             if let Some(home) = weak.upgrade()
                 && !home.save_button.is_sensitive()
             {
                 home.save_button.set_label("Save changes");
+                home.save_button.remove_css_class("saved");
             }
         });
     }

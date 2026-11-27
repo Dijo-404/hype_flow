@@ -171,6 +171,7 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     assert_eq!(config.feature_dim, values.feature_dim);
     assert_eq!(config.threads, 3);
     assert!(!home.save_button.is_sensitive());
+    assert!(home.save_button.has_css_class("saved"));
     assert!(home.download_button.is_sensitive());
     assert_eq!(
         home.download_button.label().as_deref(),
@@ -187,6 +188,7 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
             buffer.set_text("invalid rule");
         }
     }
+    assert!(!home.save_button.has_css_class("saved"));
     home.save_button.emit_clicked();
     assert_eq!(saved.borrow().len(), 1);
     assert!(!home.status.text().is_empty());
@@ -195,6 +197,8 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     assert_eq!(home.badge.text(), "Needs attention");
     assert!(home.status.has_css_class("error"));
     home.resize_layout(660);
+    let first_page = home.navigation.row_at_index(0).unwrap();
+    assert!(first_page.has_tooltip());
     assert_eq!(
         home.controls
             .iter()
@@ -204,6 +208,7 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
         "paste"
     );
     home.resize_layout(960);
+    assert!(!first_page.has_tooltip());
     let overlay = Overlay::new(Rc::new(|_| {})).unwrap();
     overlay.update("recording", "Listening", true, 0.4, 3.0);
     settle();
