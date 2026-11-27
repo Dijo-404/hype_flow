@@ -23,13 +23,8 @@
 #hype-settings label {
   color: @hf_text;
 }
-#hype-settings .muted,
-#hype-settings .page-description {
+#hype-settings .muted {
   color: @hf_muted;
-}
-#hype-settings .page-description {
-  font-size: 12px;
-  margin-bottom: 2px;
 }
 
 /* Sidebar: an inset, floating panel like macOS Sequoia. */
@@ -41,7 +36,7 @@
   padding: 10px 8px;
 }
 #hype-settings .traffic-lights {
-  padding: 2px 6px 6px;
+  padding: 2px 8px 6px;
 }
 #hype-settings button.traffic {
   min-width: 12px;
@@ -57,9 +52,9 @@
 #hype-settings button.traffic label {
   color: transparent;
   transition: color 120ms ease-out;
+  margin: -1px 0; /* the 9px glyph's 13px line box would make the light 14x15 */
 }
-#hype-settings button.traffic:hover label,
-#hype-settings button.traffic:focus label {
+#hype-settings button.traffic:hover label {
   color: rgba(0, 0, 0, 0.6);
 }
 #hype-settings button.traffic.close {
@@ -75,7 +70,7 @@
   background: #1fa533;
 }
 #hype-settings .brand {
-  margin: 0 6px 2px;
+  margin: 0 5px 2px; /* logo.svg has a 3px transparent inset at 30px: ink lands on the tile column */
 }
 #hype-settings .brand-name {
   font-size: 13px;
@@ -89,7 +84,7 @@
   margin: 1px 0;
   padding: 5px 8px;
   border-radius: 7px;
-  transition: background-color 160ms ease-out;
+  transition: background-color 120ms ease-out;
 }
 #settings-navigation row label {
   color: @hf_text;
@@ -100,14 +95,19 @@
 }
 #settings-navigation row:selected {
   background: @hf_accent_fill;
+  transition: none; /* selection lands on the first frame; the old row fades out */
 }
 #settings-navigation row:selected label {
   color: white;
   font-weight: 500;
 }
-#settings-navigation row:focus {
+#settings-navigation row:focus-visible {
   outline: 2px solid alpha(@hf_accent, 0.7);
   outline-offset: -2px;
+}
+/* The accent ring vanishes on the accent fill. */
+#settings-navigation row:selected:focus-visible {
+  outline-color: alpha(white, 0.75);
 }
 
 /* System Settings icon tiles: white glyph on a softly lit rounded square. */
@@ -132,13 +132,18 @@
 #hype-settings image.tile.indigo {
   background: linear-gradient(180deg, #7d7bf0, #4f4cd8);
 }
+#settings-navigation row:selected image.tile {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 0 1px alpha(white, 0.4); /* keeps the blue tile apart from the blue selection */
+}
 
 /* Content sits directly on the window, like a macOS detail pane. */
 #settings-content {
   background: transparent;
 }
 #hype-settings .page-header {
-  padding: 20px 28px 2px;
+  padding: 14px 28px 8px;
 }
 #hype-settings .page-title {
   font-size: 20px;
@@ -153,7 +158,7 @@
   min-width: 7px;
   min-height: 7px;
   border-radius: 999px;
-  transition: background-color 300ms ease-out;
+  transition: background-color 150ms ease-out;
 }
 #hype-settings .status-dot.ok {
   background: @hf_success;
@@ -165,14 +170,21 @@
   background: @hf_destructive;
 }
 #hype-settings .settings-page {
-  padding: 0 28px 20px;
+  padding: 8px 28px 24px;
 }
 
 /* Grouped rows: rounded group, separators inset from the leading edge. */
 #hype-settings .section-title {
   font-size: 13px;
   font-weight: 600;
-  margin-left: 4px;
+  margin: 16px 15px 0;
+}
+#hype-settings .section-title:first-child {
+  margin-top: 0;
+}
+#hype-settings .settings-page > label.muted {
+  font-size: 12px;
+  margin: 0 15px;
 }
 #hype-settings .settings-panel {
   background: @hf_group;
@@ -187,6 +199,15 @@
 #hype-settings .panel-body + .setting-row {
   border-top: 1px solid @hf_separator;
 }
+#hype-settings .setting-row > dropdown {
+  min-width: 184px;
+}
+#hype-settings stack > scrolledwindow > undershoot.top {
+  border-top: 1px solid @hf_separator;
+}
+#hype-settings .panel-body > entry {
+  margin-top: 5px;
+}
 #hype-settings .setting-row + .panel-body {
   padding-top: 0;
 }
@@ -197,45 +218,16 @@
 #hype-settings .panel-body .muted {
   font-size: 12px;
 }
-#hype-settings .model-header {
-  padding: 12px 14px 2px;
-}
 #hype-settings .model-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-}
-#hype-settings .model-badge {
-  color: @hf_muted;
-  background: alpha(white, 0.08);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 500;
-}
-#hype-settings .model-description {
-  padding: 0 14px 10px;
-  font-size: 12px;
 }
 #hype-settings .panel-body {
   padding: 10px 14px 12px;
 }
-#hype-settings .shortcut-hint {
-  padding: 2px 4px 0;
-}
-#hype-settings .keycap {
-  background: alpha(white, 0.1);
-  border: 1px solid alpha(white, 0.06);
-  border-bottom: 2px solid rgba(0, 0, 0, 0.35);
-  border-radius: 5px;
-  min-width: 14px;
-  padding: 1px 7px;
-  font-size: 11px;
-  font-weight: 500;
-}
 
 /* Push buttons: filled, borderless, with a faint top highlight. */
-#hype-settings button,
-#hype-settings combobox button {
+#hype-settings button {
   background: @hf_control;
   background-image: none;
   border: none;
@@ -244,13 +236,13 @@
   box-shadow: inset 0 1px 0 alpha(white, 0.08);
   text-shadow: none;
   -gtk-icon-shadow: none;
-  min-height: 18px;
+  min-height: 20px;
   min-width: 0;
   padding: 4px 12px;
   font-size: 13px;
   transition:
-    background-color 150ms ease-out,
-    box-shadow 150ms ease-out;
+    background-color 100ms ease-out,
+    box-shadow 100ms ease-out;
 }
 #hype-settings button:hover {
   background: @hf_control_hover;
@@ -258,28 +250,35 @@
 #hype-settings button:active {
   background: #2e2e30;
   box-shadow: none;
+  transition: none; /* press lands on the first frame; release eases */
 }
 #hype-settings button.primary {
-  background: linear-gradient(180deg, #2b7ef0, @hf_accent_fill);
+  background-color: @hf_accent_fill; /* solid base under the gradient: no transparent frame on press */
+  background-image: linear-gradient(180deg, #2b7ef0, @hf_accent_fill);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  padding: 5px 16px;
+  padding: 4px 16px;
 }
 #hype-settings button.primary label {
   color: white;
   font-weight: 500;
 }
 #hype-settings button.primary:hover {
-  background: linear-gradient(180deg, #3a88f4, #1f78e4);
+  background-image: linear-gradient(180deg, #3a88f4, #1f78e4);
 }
 #hype-settings button.primary:active {
-  background: #155fc0;
+  background-image: none;
+  background-color: #155fc0;
+}
+#hype-settings button.destructive-action label {
+  color: @hf_destructive;
 }
 #hype-settings button:disabled {
   background: alpha(white, 0.06);
   box-shadow: none;
 }
 #hype-settings button:disabled label,
-#hype-settings button.primary:disabled label {
+#hype-settings button.primary:disabled label,
+#hype-settings popover modelbutton:disabled label {
   color: alpha(white, 0.3);
 }
 #hype-settings button.primary.saved {
@@ -290,8 +289,8 @@
 }
 
 /* Focus: a plain accent outline, no glow. */
-#hype-settings button:focus,
-#hype-settings switch:focus {
+#hype-settings button:focus-visible,
+#hype-settings switch:focus-visible {
   outline: 2px solid alpha(@hf_accent, 0.7);
   outline-offset: 2px;
 }
@@ -303,15 +302,18 @@
   box-shadow: none;
   color: @hf_text;
   caret-color: @hf_accent;
-  padding: 6px 10px;
+  padding: 4px 10px;
   min-height: 18px;
-  transition: border-color 150ms ease-out;
+  transition: border-color 100ms ease-out;
 }
-#hype-settings entry:focus {
+/* GtkEntry and GtkSpinButton never take :focus; their inner text node does. */
+#hype-settings entry:focus-within,
+#hype-settings spinbutton:focus-within,
+#hype-settings .text-editor:focus-within {
   outline: none;
   border-color: @hf_accent;
 }
-#hype-settings entry selection {
+#hype-settings text selection {
   background: alpha(@hf_accent, 0.55);
   color: white;
 }
@@ -323,7 +325,7 @@
   border-radius: 999px;
   min-width: 34px;
   min-height: 20px;
-  transition: background-color 200ms ease-out;
+  transition: background-color 80ms ease-out; /* GTK starts :checked only after the ~100ms knob slide */
 }
 #hype-settings switch:checked {
   background: @hf_accent_fill;
@@ -344,17 +346,21 @@
 }
 
 #hype-settings .settings-footer {
-  padding: 10px 28px 12px;
+  padding: 12px 28px;
   border-top: 1px solid @hf_separator;
 }
 #hype-settings .settings-footer .error {
   color: @hf_destructive;
+}
+#hype-settings .settings-footer button.primary {
+  min-width: 85px; /* "Save changes" width: "Saved" must not move the button */
 }
 
 #hype-settings .text-editor {
   background: @hf_field;
   border: 1px solid alpha(white, 0.1);
   border-radius: 6px;
+  transition: border-color 100ms ease-out;
 }
 #hype-settings textview,
 #hype-settings textview text {
@@ -364,14 +370,6 @@
   font-family: "Noto Sans", sans-serif;
   font-size: 13px;
 }
-#hype-settings textview:focus {
-  outline: 1px solid alpha(@hf_accent, 0.8);
-  outline-offset: -1px;
-}
-#hype-settings textview text selection {
-  background: alpha(@hf_accent, 0.55);
-  color: white;
-}
 
 /* Stepper: one control instead of three boxes. */
 #hype-settings spinbutton {
@@ -380,15 +378,14 @@
   border: 1px solid alpha(white, 0.1);
   border-radius: 6px;
   box-shadow: none;
+  min-height: 26px;
+  transition: border-color 100ms ease-out;
 }
-#hype-settings spinbutton entry {
-  border: none;
-  background: transparent;
-  box-shadow: none;
+#hype-settings spinbutton > text {
   min-width: 34px;
-  padding: 4px 10px;
+  padding: 0 4px 0 10px;
 }
-#hype-settings spinbutton button {
+#hype-settings spinbutton > button {
   background: transparent;
   border-left: 1px solid alpha(white, 0.1);
   border-radius: 0;
@@ -428,4 +425,59 @@ tooltip.background {
 tooltip label {
   color: alpha(white, 0.88);
   font-size: 12px;
+}
+
+/* DropDown menus: popovers reset the font and take the system theme's colours otherwise. */
+#hype-settings popover {
+  font-family: "Noto Sans", sans-serif;
+  font-size: 13px;
+  color: @hf_text;
+}
+#hype-settings popover > contents {
+  background: #2c2c2e;
+  border: 1px solid alpha(white, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+}
+/* The emoji chooser's grid is a .view: without this it keeps the theme's base colour. */
+#hype-settings popover .view {
+  background: transparent;
+}
+#hype-settings popover > arrow {
+  background: #2c2c2e;
+  border: 1px solid alpha(white, 0.1);
+}
+#hype-settings popover listview {
+  background: transparent;
+  color: @hf_text;
+  margin: 0;
+}
+#hype-settings popover listview > row {
+  color: @hf_text;
+  border-radius: 5px;
+  padding: 4px 8px;
+  outline: none; /* the hover fill marks the keyboard row too */
+}
+#hype-settings popover listview > row:selected {
+  background: transparent; /* the check mark shows the current choice, like a macOS popup */
+}
+#hype-settings popover listview > row:hover,
+#hype-settings popover listview > row:focus-visible,
+#hype-settings popover modelbutton:selected {
+  background: @hf_accent_fill;
+  color: white;
+}
+#hype-settings popover listview > row:hover label,
+#hype-settings popover listview > row:hover image,
+#hype-settings popover listview > row:focus-visible label,
+#hype-settings popover listview > row:focus-visible image,
+#hype-settings popover modelbutton:selected label {
+  color: white;
+}
+#hype-settings popover separator {
+  background: @hf_hairline;
+}
+#hype-settings popover listview > row box {
+  border-spacing: 12px;
 }

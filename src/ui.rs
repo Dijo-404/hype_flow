@@ -347,7 +347,7 @@ impl Home {
         let handle = gtk::WindowHandle::new();
         handle.set_child(Some(&lights));
         sidebar.append(&handle);
-        let brand = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let brand = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         brand.add_css_class("brand");
         let bytes = glib::Bytes::from_static(include_bytes!("../assets/logo.svg"));
         let icon = gdk::Texture::from_bytes(&bytes).ok();
@@ -373,10 +373,12 @@ impl Home {
             content.append(&text);
             let item = gtk::ListBoxRow::new();
             item.set_tooltip_text(Some(title));
+            // Labels say the same in the wide layout; resize_layout turns tooltips on when compact.
+            item.set_has_tooltip(false);
             item.set_child(Some(&content));
             navigation.append(&item);
         }
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content.set_widget_name("settings-content");
         content.set_hexpand(true);
         shell.append(&content);
@@ -395,14 +397,14 @@ impl Home {
         content.append(&header);
         let stack = gtk::Stack::builder()
             .transition_type(gtk::StackTransitionType::Crossfade)
-            .transition_duration(220)
+            .transition_duration(120)
             .vexpand(true)
             .build();
         content.append(&stack);
         let pages: Vec<gtk::Box> = PAGES
             .iter()
             .map(|(name, _, _)| {
-                let page = gtk::Box::new(gtk::Orientation::Vertical, 10);
+                let page = gtk::Box::new(gtk::Orientation::Vertical, 8);
                 page.add_css_class("settings-page");
                 let scroll = gtk::ScrolledWindow::builder()
                     .hscrollbar_policy(gtk::PolicyType::Never)
@@ -429,6 +431,7 @@ impl Home {
         transcription.append(&model_summary);
         let download_button = gtk::Button::with_label("Install selected model");
         download_button.set_halign(gtk::Align::End);
+        download_button.set_valign(gtk::Align::Center);
         {
             let action = action.clone();
             download_button.connect_clicked(move |_| action("download"));
@@ -667,6 +670,9 @@ impl Home {
                     .unwrap_or(0) as u32,
             );
             let item = row(group, title, detail, &dropdown);
+            if key == "model_variant" {
+                item.append(&download_button);
+            }
             rows.push((item, dropdown.clone().upcast()));
             controls.push((
                 key.to_string(),
@@ -676,16 +682,12 @@ impl Home {
                 ),
             ));
         }
-        let model_actions = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        model_actions.add_css_class("panel-body");
-        model_actions.append(&download_button);
-        transcription.append(&model_actions);
         let prompt = gtk::Entry::builder()
             .text(&values.prompt)
             .placeholder_text("niri, Hype Flow, project names…")
             .hexpand(true)
             .build();
-        let vocabulary_body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let vocabulary_body = gtk::Box::new(gtk::Orientation::Vertical, 3);
         vocabulary_body.add_css_class("panel-body");
         let prompt_title = "Names and specialist terms";
         vocabulary_body.append(&label(prompt_title, "row-title"));
@@ -755,7 +757,7 @@ impl Home {
                 .build();
             scroll.add_css_class("text-editor");
             body.append(&scroll);
-            group.append(&body);
+            group.insert_child_after(&body, group.first_child().as_ref());
             controls.push((key.to_string(), Control::Text(editor.buffer())));
         }
         let transcript = section(&pages[0], "Last transcript");
@@ -791,7 +793,13 @@ impl Home {
                 "clear-recordings",
             ),
         ] {
-            let button = gtk::Button::with_label(button_label);
+            let button = gtk::Button::builder()
+                .label(button_label)
+                .width_request(184)
+                .build();
+            if name == "clear-recordings" {
+                button.add_css_class("destructive-action");
+            }
             let action = action.clone();
             button.connect_clicked(move |_| action(name));
             row(&transcript, title, detail, &button);
@@ -825,7 +833,10 @@ impl Home {
         }
         pages[4].append(&label("Click a shortcut, then press the keys you want. Escape cancels. Use Save changes to apply; existing bindings are checked first.", "muted"));
         let integration = section(&pages[4], "niri integration");
-        let configure = gtk::Button::with_label("Configure niri");
+        let configure = gtk::Button::builder()
+            .label("Configure niri")
+            .width_request(184)
+            .build();
         {
             let action = action.clone();
             configure.connect_clicked(move |_| action("shortcuts"));
@@ -883,6 +894,7 @@ impl Home {
             if let Some(home) = weak.upgrade() {
                 home.save_button.set_sensitive(true);
                 home.save_button.set_label("Save changes");
+                home.save_button.remove_css_class("saved");
             }
         });
         for (key, control) in &home.controls {
@@ -1053,6 +1065,16 @@ impl Home {
         });
         for label in &self.navigation_labels {
             label.set_visible(!compact);
+            if let Some(parent) = label.parent() {
+                parent.set_halign(if compact {
+                    gtk::Align::Center
+                } else {
+                    gtk::Align::Fill
+                });
+            }
+            if let Some(row) = label.ancestor(gtk::ListBoxRow::static_type()) {
+                row.set_has_tooltip(compact);
+            }
         }
         for (row, control) in &self.rows {
             row.set_orientation(if compact {
@@ -1075,16 +1097,19 @@ impl Home {
         if !self.changes().is_ok_and(|draft| draft == values) {
             self.save_button.set_sensitive(true);
             self.save_button.set_label("Save changes");
+            self.save_button.remove_css_class("saved");
             return;
         }
         self.save_button.set_sensitive(false);
         self.save_button.set_label("Saved");
+        self.save_button.add_css_class("saved");
         let weak = Rc::downgrade(self);
         glib::timeout_add_local_once(std::time::Duration::from_millis(1600), move || {
             if let Some(home) = weak.upgrade()
                 && !home.save_button.is_sensitive()
             {
                 home.save_button.set_label("Save changes");
+                home.save_button.remove_css_class("saved");
             }
         });
     }
@@ -1191,40 +1216,57 @@ impl Home {
     }
 }
 
+const MORPH_US: i64 = 180_000;
+const FADE_IN_US: i64 = 140_000;
+const FADE_OUT_US: i64 = 110_000;
+// 8px would push the 6px shadow past the 72px surface at the smallest scale.
+const RISE: f64 = 5.0;
+
+fn ease_out_cubic(t: f64) -> f64 {
+    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
+}
+
 struct PillState {
     phase: String,
     message: String,
-    volume: f64,
-    duration: f64,
     levels: [f64; 11],
-    last_sample: i64,
-    began: i64,
     width: f64,
+    from: f64,
     target: f64,
+    moved: i64,
+    shown: f64,
+    show_from: f64,
+    faded: i64,
+    wanted: bool,
     input: [i32; 4],
 }
 
 impl PillState {
     fn animating(&self, animated: bool) -> bool {
-        self.phase == "recording"
+        if !self.wanted {
+            return self.shown != 0.0;
+        }
+        self.shown != 1.0
             || self.width != self.target
             || (animated && matches!(self.phase.as_str(), "transcribing" | "delivering"))
     }
 
     /// Returns whether the phase or message changed.
-    fn set_phase(&mut self, phase: &str, message: &str) -> bool {
-        self.target = if phase == "recording" {
-            114.0
+    fn set_phase(&mut self, phase: &str, message: &str, now: i64) -> bool {
+        let target = if phase == "recording" {
+            112.0
         } else if matches!(phase, "starting" | "transcribing" | "delivering") {
             48.0
         } else {
             310.0
         };
+        if target != self.target {
+            (self.from, self.target, self.moved) = (self.width, target, now);
+        }
         if self.phase == phase && self.message == message {
             return false;
         }
         if self.phase != phase {
-            self.began = glib::monotonic_time();
             self.levels = [0.0; 11];
         }
         self.phase = phase.into();
@@ -1232,18 +1274,44 @@ impl PillState {
         true
     }
 
-    fn step(&mut self, animated: bool) {
-        // Snap the last half pixel so the tick callback can stop.
-        if animated && (self.target - self.width).abs() > 0.5 {
-            self.width += (self.target - self.width) * 0.2;
-        } else {
-            self.width = self.target;
+    fn set_wanted(&mut self, wanted: bool, now: i64) {
+        if wanted != self.wanted {
+            (self.wanted, self.show_from, self.faded) = (wanted, self.shown, now);
         }
+    }
+
+    /// Width and presence are pure functions of time, so every frame rate lands exactly.
+    fn step(&mut self, now: i64, animated: bool) {
+        let t = (now - self.moved) as f64 / MORPH_US as f64;
+        self.width = if animated && t < 1.0 {
+            self.from + (self.target - self.from) * ease_out_cubic(t)
+        } else {
+            self.target
+        };
+        let (goal, length) = if self.wanted {
+            (1.0, FADE_IN_US)
+        } else {
+            (0.0, FADE_OUT_US)
+        };
+        let t = (now - self.faded) as f64 / length as f64;
+        self.shown = if animated && t < 1.0 {
+            self.show_from + (goal - self.show_from) * ease_out_cubic(t)
+        } else {
+            goal
+        };
     }
 }
 
 fn animations() -> bool {
-    gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations())
+    gtk::Settings::default().is_none_or(|settings| {
+        settings.is_gtk_enable_animations()
+            // GTK 4.22+: 1 = GTK_REDUCED_MOTION_REDUCE; read by name to keep the v4_12 floor.
+            && !(settings.find_property("gtk-interface-reduced-motion").is_some()
+                && glib::EnumValue::from_value(
+                    &settings.property_value("gtk-interface-reduced-motion"),
+                )
+                .is_some_and(|(_, value)| value.value() == 1))
+    })
 }
 
 pub struct Overlay {
@@ -1290,31 +1358,33 @@ impl Overlay {
         let state = Rc::new(RefCell::new(PillState {
             phase: "idle".into(),
             message: "Ready".into(),
-            volume: 0.0,
-            duration: 0.0,
             levels: [0.0; 11],
-            last_sample: 0,
-            began: 0,
-            width: 270.0,
-            target: 270.0,
+            width: 310.0,
+            from: 310.0,
+            target: 310.0,
+            moved: 0,
+            shown: 0.0,
+            show_from: 0.0,
+            faded: 0,
+            wanted: false,
             input: [0; 4],
         }));
         let draw_state = state.clone();
         area.set_draw_func(move |area, cr, width, height| {
             let mut state = draw_state.borrow_mut();
-            let now = glib::monotonic_time();
-            if now - state.last_sample > 80_000 && state.phase == "recording" {
-                state.levels.rotate_left(1);
-                state.levels[10] = state.volume;
-                state.last_sample = now;
-            }
-            let animated = animations();
-            state.step(animated);
-            let w = state.width;
-            let h = 48.0;
-            let x = (width as f64 - w) / 2.0;
-            let y = (height as f64 - h) / 2.0;
-            let input = [x as i32, y as i32, w.ceil() as i32, h as i32];
+            let now = area
+                .frame_clock()
+                .map_or_else(glib::monotonic_time, |clock| clock.frame_time());
+            let (width, height) = (f64::from(width), f64::from(height));
+            draw_pill(cr, &mut state, width, height, now, animations());
+            // A fading capsule must not take clicks meant for the window under it.
+            let input = if state.wanted {
+                let x = (width - state.width) / 2.0;
+                let y = (height - 48.0) / 2.0;
+                [x as i32, y as i32, state.width.ceil() as i32, 48]
+            } else {
+                [0; 4]
+            };
             if state.input != input
                 && let Some(surface) = area.native().and_then(|native| native.surface())
             {
@@ -1323,88 +1393,6 @@ impl Overlay {
                 ));
                 surface.set_input_region(Some(&region));
                 state.input = input;
-            }
-            if matches!(state.phase.as_str(), "transcribing" | "delivering") {
-                let angle = if animated {
-                    (now as f64 / 1_600_000.0).fract() * std::f64::consts::TAU
-                } else {
-                    0.0
-                };
-                cr.set_source_rgba(0.22, 0.60, 0.97, 0.2);
-                capsule(cr, x - 4.0, y - 4.0, w + 8.0, h + 8.0);
-                let _ = cr.fill();
-                let gradient = gtk::cairo::LinearGradient::new(
-                    x + w / 2.0 + angle.cos() * w / 2.0,
-                    y + angle.sin() * h,
-                    x + w / 2.0 - angle.cos() * w / 2.0,
-                    y - angle.sin() * h,
-                );
-                gradient.add_color_stop_rgb(0.0, 0.92, 0.97, 1.0);
-                gradient.add_color_stop_rgb(0.3, 0.22, 0.74, 0.97);
-                gradient.add_color_stop_rgb(1.0, 0.15, 0.38, 0.92);
-                let _ = cr.set_source(&gradient);
-                capsule(cr, x - 2.0, y - 2.0, w + 4.0, h + 4.0);
-                let _ = cr.fill();
-            }
-            capsule(cr, x, y, w, h);
-            cr.set_source_rgb(0.125, 0.133, 0.145);
-            let _ = cr.fill_preserve();
-            cr.set_source_rgb(if state.phase == "error" { 0.54 } else { 0.23 }, 0.23, 0.25);
-            cr.set_line_width(1.0);
-            let _ = cr.stroke();
-            cr.set_source_rgb(0.91, 0.91, 0.91);
-            cr.set_line_width(2.0);
-            cr.set_line_cap(gtk::cairo::LineCap::Round);
-            let cx = x + 24.0;
-            let cy = height as f64 / 2.0;
-            capsule(cr, cx - 3.0, cy - 9.0, 6.0, 13.0);
-            let _ = cr.stroke();
-            cr.arc(cx, cy - 1.0, 7.0, 0.0, std::f64::consts::PI);
-            let _ = cr.stroke();
-            cr.move_to(cx, cy + 6.0);
-            cr.line_to(cx, cy + 10.0);
-            cr.move_to(cx - 4.0, cy + 10.0);
-            cr.line_to(cx + 4.0, cy + 10.0);
-            let _ = cr.stroke();
-            if state.phase == "recording" && now - state.began > 660_000 {
-                for (index, level) in state.levels.iter().enumerate() {
-                    let length = 4.0 + level.powf(0.75) * 18.0;
-                    let x = cx + 20.0 + index as f64 * 5.0;
-                    cr.move_to(x, cy - length / 2.0);
-                    cr.line_to(x, cy + length / 2.0);
-                }
-                let _ = cr.stroke();
-            } else if !matches!(
-                state.phase.as_str(),
-                "starting" | "recording" | "transcribing" | "delivering"
-            ) {
-                let title = if state.phase == "done" {
-                    state.message.as_str()
-                } else if state.phase == "error" {
-                    "Hype Flow needs attention"
-                } else if state.phase == "loading" {
-                    "Loading speech model"
-                } else {
-                    "Hype Flow"
-                };
-                cr.select_font_face(
-                    "Noto Sans",
-                    gtk::cairo::FontSlant::Normal,
-                    gtk::cairo::FontWeight::Normal,
-                );
-                cr.set_font_size(12.0);
-                cr.move_to(x + 46.0, cy - 2.0);
-                let clipped: String = title.chars().take(38).collect();
-                let _ = cr.show_text(&clipped);
-                cr.set_font_size(10.0);
-                cr.set_source_rgb(0.60, 0.61, 0.63);
-                cr.move_to(x + 46.0, cy + 13.0);
-                let detail = if state.phase == "error" {
-                    state.message.chars().take(42).collect::<String>()
-                } else {
-                    "Press your shortcut to speak".into()
-                };
-                let _ = cr.show_text(&detail);
             }
         });
         let gesture = gtk::GestureClick::new();
@@ -1435,12 +1423,21 @@ impl Overlay {
         })
     }
 
-    pub fn update(&self, phase: &str, message: &str, visible: bool, volume: f64, duration: f64) {
+    pub fn update(&self, phase: &str, message: &str, visible: bool, volume: f64, _duration: f64) {
+        let animated = animations();
+        let now = glib::monotonic_time();
         let mut state = self.state.borrow_mut();
-        state.volume = volume;
-        state.duration = duration;
+        state.step(now, animated);
+        // A fading capsule keeps its last look; the next visible update carries the current phase.
+        let fading = !visible && self.window.is_visible();
+        let changed = !fading && state.set_phase(phase, message, now);
+        if !fading && phase == "recording" {
+            // One bar per audio frame (~20 Hz) so the meter scrolls in step with the mic.
+            state.levels.rotate_left(1);
+            state.levels[10] = volume;
+        }
         // Audio frames repeat the phase about 20 times a second; skip the accessibility churn.
-        if state.set_phase(phase, message) || self.window.is_visible() != visible {
+        if changed || state.wanted != visible || self.window.is_visible() != visible {
             self.area
                 .update_property(&[gtk::accessible::Property::Label(message)]);
             self.window.set_tooltip_text(Some(if phase == "recording" {
@@ -1448,44 +1445,228 @@ impl Overlay {
             } else {
                 message
             }));
-            self.window.set_visible(visible);
+            state.set_wanted(visible, now);
+            if visible && !self.window.is_visible() {
+                // Appear at the final size; only animate between visible phases.
+                (state.width, state.from, state.show_from) = (state.target, state.target, 0.0);
+                self.window.set_visible(true);
+            } else if !visible && !(animated && self.area.is_mapped()) {
+                (state.shown, state.show_from) = (0.0, 0.0);
+                self.window.set_visible(false);
+            }
         }
-        let animating = visible && state.animating(animations());
+        let animating = self.window.is_visible() && state.animating(animated);
         drop(state);
         self.area.queue_draw();
         if animating && !self.ticking.replace(true) {
             let state = self.state.clone();
             let ticking = self.ticking.clone();
+            let window = self.window.downgrade();
             self.area.add_tick_callback(move |area, _| {
                 area.queue_draw();
                 if area.is_mapped() && state.borrow().animating(animations()) {
-                    glib::ControlFlow::Continue
-                } else {
-                    ticking.set(false);
-                    glib::ControlFlow::Break
+                    return glib::ControlFlow::Continue;
                 }
+                // The fade-out ended (or cannot run unmapped): finish the deferred hide.
+                if !state.borrow().wanted
+                    && let Some(window) = window.upgrade()
+                {
+                    window.set_visible(false);
+                }
+                ticking.set(false);
+                glib::ControlFlow::Break
             });
         }
     }
 }
 
+/// Paints the capsule at `now`; widget-free so tests can render it offscreen.
+fn draw_pill(
+    cr: &gtk::cairo::Context,
+    state: &mut PillState,
+    width: f64,
+    height: f64,
+    now: i64,
+    animated: bool,
+) {
+    state.step(now, animated);
+    let presence = state.shown;
+    if presence <= 0.0 {
+        return;
+    }
+    if presence < 1.0 {
+        let (mx, my) = (width / 2.0, height / 2.0);
+        let scale = 0.94 + 0.06 * presence;
+        cr.translate(mx, my + (1.0 - presence) * RISE);
+        cr.scale(scale, scale);
+        cr.translate(-mx, -my);
+        cr.push_group();
+    }
+    let (w, h) = (state.width, 48.0);
+    let x = (width - w) / 2.0;
+    let y = (height - h) / 2.0;
+    let error = state.phase == "error";
+    // Stacked fills fake a blurred shadow; cairo has no blur.
+    for (spread, alpha) in [
+        (6.0, 0.03),
+        (5.0, 0.03),
+        (4.0, 0.035),
+        (3.0, 0.04),
+        (2.0, 0.045),
+        (1.0, 0.05),
+    ] {
+        cr.set_source_rgba(0.0, 0.0, 0.0, alpha);
+        capsule(
+            cr,
+            x - spread,
+            y - spread + 2.0,
+            w + 2.0 * spread,
+            h + 2.0 * spread,
+        );
+        let _ = cr.fill();
+    }
+    if matches!(state.phase.as_str(), "transcribing" | "delivering") {
+        let angle = if animated {
+            (now as f64 / 1_600_000.0).fract() * std::f64::consts::TAU
+        } else {
+            0.0
+        };
+        cr.set_source_rgba(0.04, 0.52, 1.0, 0.18);
+        capsule(cr, x - 4.0, y - 4.0, w + 8.0, h + 8.0);
+        let _ = cr.fill();
+        // Endpoints mirror through the centre so the highlight circles the ring.
+        let (mx, my) = (x + w / 2.0, y + h / 2.0);
+        let (dx, dy) = (angle.cos() * w / 2.0, angle.sin() * h / 2.0);
+        let gradient = gtk::cairo::LinearGradient::new(mx + dx, my + dy, mx - dx, my - dy);
+        gradient.add_color_stop_rgb(0.0, 0.85, 0.93, 1.0);
+        gradient.add_color_stop_rgb(0.35, 0.04, 0.52, 1.0);
+        gradient.add_color_stop_rgb(1.0, 0.0, 0.25, 0.75);
+        let _ = cr.set_source(&gradient);
+        capsule(cr, x - 2.0, y - 2.0, w + 4.0, h + 4.0);
+        let _ = cr.fill();
+    }
+    capsule(cr, x, y, w, h);
+    cr.set_source_rgb(0.149, 0.149, 0.157);
+    let _ = cr.fill_preserve();
+    let _ = cr.save();
+    cr.clip(); // nothing below may leave the pill while it morphs
+    let reveal = (1.0 - (state.target - w).abs() / 40.0).clamp(0.0, 1.0);
+    let cx = (x + 24.0).round();
+    let cy = height / 2.0;
+    if error {
+        cr.set_source_rgb(1.0, 0.41, 0.38);
+    } else {
+        cr.set_source_rgb(0.92, 0.92, 0.92);
+    }
+    cr.set_line_width(2.0);
+    cr.set_line_cap(gtk::cairo::LineCap::Round);
+    capsule(cr, cx - 3.0, cy - 10.0, 6.0, 12.0);
+    let _ = cr.stroke();
+    cr.arc(cx, cy - 1.0, 7.0, 0.0, std::f64::consts::PI);
+    let _ = cr.stroke();
+    cr.move_to(cx, cy + 6.0);
+    cr.line_to(cx, cy + 10.0);
+    cr.move_to(cx - 4.0, cy + 10.0);
+    cr.line_to(cx + 4.0, cy + 10.0);
+    let _ = cr.stroke();
+    cr.set_source_rgba(0.92, 0.92, 0.92, reveal);
+    if state.phase == "recording" {
+        for (index, level) in state.levels.iter().enumerate() {
+            let length = 4.0 + level.powf(0.75) * 18.0;
+            let bar = cx + 20.0 + index as f64 * 5.0;
+            cr.move_to(bar, cy - length / 2.0);
+            cr.line_to(bar, cy + length / 2.0);
+        }
+        let _ = cr.stroke();
+    } else if !matches!(
+        state.phase.as_str(),
+        "starting" | "transcribing" | "delivering"
+    ) {
+        let hint = "Press your shortcut to speak";
+        let (title, detail) = match state.phase.as_str() {
+            "error" => (
+                state.message.as_str(),
+                "Click for details · right-click to dismiss",
+            ),
+            "done" => state
+                .message
+                .split_once(" · ")
+                .unwrap_or((state.message.as_str(), hint)),
+            "loading" => ("Loading speech model", hint),
+            _ => ("Hype Flow", hint),
+        };
+        // Measured against the target so the ellipsis holds still while the pill grows.
+        let max = state.target - 66.0;
+        cr.select_font_face(
+            "Noto Sans",
+            gtk::cairo::FontSlant::Normal,
+            gtk::cairo::FontWeight::Normal,
+        );
+        cr.set_font_size(13.0);
+        cr.move_to(cx + 22.0, cy - 3.0);
+        let _ = cr.show_text(&fit(cr, title, max));
+        cr.set_font_size(11.0);
+        cr.set_source_rgba(0.62, 0.62, 0.64, reveal);
+        cr.move_to(cx + 22.0, cy + 13.0);
+        let mut chars = detail.chars();
+        let detail: String = chars
+            .next()
+            .into_iter()
+            .flat_map(char::to_uppercase)
+            .chain(chars)
+            .collect();
+        let _ = cr.show_text(&fit(cr, &detail, max));
+    }
+    let _ = cr.restore();
+    // Half-pixel inset puts the 1px hairline on one pixel row instead of two half-lit ones.
+    capsule(cr, x + 0.5, y + 0.5, w - 1.0, h - 1.0);
+    if error {
+        cr.set_source_rgba(1.0, 0.41, 0.38, 0.55);
+    } else {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.10);
+    }
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
+    if presence < 1.0 {
+        let _ = cr.pop_group_to_source();
+        let _ = cr.paint_with_alpha(presence);
+    }
+}
+
+/// Cuts `text` to `max` pixels with an ellipsis; the toy text API has no layout.
+fn fit(cr: &gtk::cairo::Context, text: &str, max: f64) -> String {
+    let width = |text: &str| {
+        cr.text_extents(text)
+            .map_or(0.0, |extents| extents.x_advance())
+    };
+    if width(text) <= max {
+        return text.into();
+    }
+    let mut cut = text.to_string();
+    while cut.pop().is_some() {
+        let candidate = format!("{}…", cut.trim_end());
+        if width(&candidate) <= max {
+            return candidate;
+        }
+    }
+    "…".into()
+}
+
+/// Full-radius rounded rectangle: a horizontal or vertical pill.
 fn capsule(cr: &gtk::cairo::Context, x: f64, y: f64, width: f64, height: f64) {
+    use std::f64::consts::{FRAC_PI_2, PI};
     let radius = height.min(width) / 2.0;
     cr.new_sub_path();
+    cr.arc(x + width - radius, y + radius, radius, -FRAC_PI_2, 0.0);
     cr.arc(
         x + width - radius,
-        y + radius,
+        y + height - radius,
         radius,
-        -std::f64::consts::FRAC_PI_2,
-        std::f64::consts::FRAC_PI_2,
+        0.0,
+        FRAC_PI_2,
     );
-    cr.arc(
-        x + radius,
-        y + radius,
-        radius,
-        std::f64::consts::FRAC_PI_2,
-        3.0 * std::f64::consts::FRAC_PI_2,
-    );
+    cr.arc(x + radius, y + height - radius, radius, FRAC_PI_2, PI);
+    cr.arc(x + radius, y + radius, radius, PI, 3.0 * FRAC_PI_2);
     cr.close_path();
 }
 
@@ -1497,26 +1678,68 @@ mod tests {
         PillState {
             phase: "idle".into(),
             message: "Ready".into(),
-            volume: 0.0,
-            duration: 0.0,
             levels: [0.0; 11],
-            last_sample: 0,
-            began: 0,
             width: 310.0,
+            from: 310.0,
             target: 310.0,
+            moved: 0,
+            shown: 1.0,
+            show_from: 1.0,
+            faded: 0,
+            wanted: true,
             input: [0; 4],
         }
+    }
+
+    /// A shown capsule that has finished morphing into `phase`.
+    fn settled_pill(phase: &str, message: &str) -> PillState {
+        let mut pill = idle_pill();
+        pill.set_phase(phase, message, 0);
+        pill.step(MORPH_US, true);
+        pill
+    }
+
+    fn render(pill: &mut PillState, now: i64, background: Option<f64>) -> gtk::cairo::ImageSurface {
+        let surface =
+            gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 340, 72).unwrap();
+        let cr = gtk::cairo::Context::new(&surface).unwrap();
+        if let Some(shade) = background {
+            cr.set_source_rgb(shade, shade, shade);
+            cr.paint().unwrap();
+        }
+        draw_pill(&cr, pill, 340.0, 72.0, now, true);
+        drop(cr);
+        surface.flush();
+        surface
+    }
+
+    /// Premultiplied BGRA rows, 340 pixels each.
+    fn pixels(mut surface: gtk::cairo::ImageSurface) -> Vec<Vec<[u8; 4]>> {
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        data.chunks(stride)
+            .map(|row| {
+                row[..340 * 4]
+                    .chunks(4)
+                    .map(|pixel| pixel.try_into().unwrap())
+                    .collect()
+            })
+            .collect()
     }
 
     #[test]
     fn overlay_ticks_only_while_something_moves() {
         let mut pill = idle_pill();
         assert!(!pill.animating(true));
-        pill.target = 114.0;
+        pill.target = 112.0;
         assert!(pill.animating(true));
         pill.phase = "recording".into();
-        pill.width = 114.0;
+        pill.width = 112.0;
+        // Each audio frame queues the redraw of a settled recording capsule.
+        assert!(!pill.animating(true));
+        pill.shown = 0.5;
         assert!(pill.animating(false));
+        pill.shown = 1.0;
         pill.phase = "transcribing".into();
         pill.width = 48.0;
         pill.target = 48.0;
@@ -1527,27 +1750,198 @@ mod tests {
     #[test]
     fn overlay_width_settles_exactly_so_the_tick_stops() {
         let mut pill = idle_pill();
-        pill.set_phase("transcribing", "Transcribing");
-        for _ in 0..1000 {
-            pill.step(true);
-        }
+        pill.set_phase("transcribing", "Transcribing", 0);
+        pill.step(MORPH_US / 2, true);
+        assert!(pill.width > 48.0 && pill.width < 310.0 && pill.animating(false));
+        pill.step(MORPH_US, true);
         assert_eq!(pill.width, 48.0);
         assert!(!pill.animating(false));
     }
 
     #[test]
+    fn overlay_motion_ignores_the_frame_rate() {
+        let (mut slow, mut fast) = (idle_pill(), idle_pill());
+        for pill in [&mut slow, &mut fast] {
+            pill.set_phase("starting", "Opening microphone", 0);
+            (pill.wanted, pill.shown) = (false, 0.0);
+            pill.set_wanted(true, 0);
+        }
+        for frame in 0..6 {
+            slow.step(frame * 16_667, true);
+        }
+        for frame in 0..15 {
+            fast.step(frame * 6_944, true);
+        }
+        slow.step(100_000, true);
+        fast.step(100_000, true);
+        assert!(slow.width > 48.0 && slow.width < 310.0 && slow.shown < 1.0);
+        assert_eq!((slow.width, slow.shown), (fast.width, fast.shown));
+    }
+
+    #[test]
+    fn overlay_fade_out_ends_hidden_and_reverses_smoothly() {
+        let mut pill = idle_pill();
+        pill.set_wanted(false, 0);
+        pill.step(FADE_OUT_US / 2, true);
+        let midway = pill.shown;
+        assert!(midway > 0.0 && midway < 1.0 && pill.animating(true));
+        pill.set_wanted(true, FADE_OUT_US / 2);
+        pill.step(FADE_OUT_US / 2, true);
+        assert_eq!(pill.shown, midway);
+        pill.step(FADE_OUT_US / 2 + FADE_IN_US, true);
+        assert_eq!(pill.shown, 1.0);
+        pill.set_wanted(false, 1_000_000);
+        pill.step(1_000_000 + FADE_OUT_US, true);
+        assert_eq!(pill.shown, 0.0);
+        assert!(!pill.animating(true));
+        pill.set_wanted(true, 2_000_000);
+        pill.step(2_000_000, false);
+        assert_eq!(pill.shown, 1.0);
+    }
+
+    #[test]
     fn repeated_audio_frames_keep_the_overlay_phase() {
         let mut pill = idle_pill();
-        assert!(pill.set_phase("recording", "Listening"));
+        assert!(pill.set_phase("recording", "Listening", 0));
         pill.levels[10] = 0.6;
-        let began = pill.began;
-        assert!(!pill.set_phase("recording", "Listening"));
-        assert_eq!(
-            (pill.began, pill.levels[10], pill.target),
-            (began, 0.6, 114.0)
-        );
-        assert!(pill.set_phase("recording", "Microphone busy"));
+        assert!(!pill.set_phase("recording", "Listening", 50_000));
+        assert_eq!((pill.moved, pill.levels[10], pill.target), (0, 0.6, 112.0));
+        assert!(pill.set_phase("recording", "Microphone busy", 100_000));
         assert_eq!(pill.levels[10], 0.6);
+    }
+
+    #[test]
+    fn overlay_content_never_leaves_the_capsule_while_it_grows() {
+        let error = "Paste failed. Use Copy transcript in Hype Flow. wtype: compositor does not support virtual keyboard";
+        for (from, phase, message) in [
+            (
+                "delivering",
+                "done",
+                "Microphone is silent · check it is not muted",
+            ),
+            ("recording", "error", error),
+        ] {
+            let mut pill = settled_pill(from, "");
+            pill.set_phase(phase, message, 0);
+            let mut text = 0;
+            for now in (0..=MORPH_US + 20_000).step_by(2_000) {
+                let rows = pixels(render(&mut pill, now, None));
+                let (left, right) = (
+                    (340.0 - pill.width) / 2.0 + 24.0,
+                    (340.0 + pill.width) / 2.0 - 24.0,
+                );
+                text = 0;
+                for (row, pixels) in rows.iter().enumerate() {
+                    for (column, pixel) in pixels.iter().enumerate() {
+                        let (px, py) = (column as f64 + 0.5, row as f64 + 0.5);
+                        // One pixel of slack covers the edge antialiasing.
+                        let inside = (px - px.clamp(left, right)).hypot(py - 36.0) <= 25.0;
+                        // Only the black shadow may paint outside the capsule.
+                        assert!(
+                            inside || pixel[..3] == [0, 0, 0],
+                            "{phase} at {now}us: ink at {column},{row}"
+                        );
+                        text += usize::from(column > 61 && pixel[1] > 128);
+                    }
+                }
+            }
+            assert_eq!(pill.width, 310.0);
+            assert!(text > 100, "{phase} shows its message once settled");
+        }
+    }
+
+    #[test]
+    fn overlay_frames_fit_the_surface() {
+        let error = "Paste failed. Use Copy transcript in Hype Flow. wtype: compositor does not support virtual keyboard";
+        let phases = [
+            ("idle", "Ready"),
+            ("loading", "Loading speech model"),
+            ("starting", "Opening microphone"),
+            ("recording", "Listening"),
+            ("transcribing", "Transcribing"),
+            ("delivering", "Copying transcript"),
+            ("done", "Microphone is silent · check it is not muted"),
+            ("error", error),
+        ];
+        for (phase, message) in phases {
+            for presence in [0.01, 0.1, 0.3, 0.5, 0.8, 1.0] {
+                // Ring angles 0, 90, 180 and 270 degrees.
+                for now in [1_600_000, 2_000_000, 2_400_000, 2_800_000] {
+                    let mut pill = settled_pill(phase, message);
+                    pill.levels = [1.0; 11];
+                    (pill.show_from, pill.faded) = (presence, now);
+                    let rows = pixels(render(&mut pill, now, None));
+                    let mut edges = rows[0]
+                        .iter()
+                        .chain(&rows[71])
+                        .chain(rows.iter().flat_map(|row| [&row[0], &row[339]]));
+                    assert!(
+                        edges.all(|pixel| pixel[3] == 0),
+                        "{phase} at presence {presence} touches the surface edge"
+                    );
+                }
+            }
+        }
+        let Some(directory) = std::env::var_os("HYPE_FLOW_UI_CAPTURE_DIR") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        // Late enough that every width morph has settled.
+        const T: i64 = 1_000_000;
+        let mut recording = settled_pill("recording", "Listening");
+        recording.levels = [0.05, 0.2, 0.5, 0.9, 1.0, 0.7, 0.4, 0.3, 0.6, 0.15, 0.02];
+        let mut growing = settled_pill("delivering", "Copying transcript");
+        growing.set_phase("done", "Copied · focus changed before paste", T);
+        let mut appearing = settled_pill("recording", "Listening");
+        (appearing.wanted, appearing.shown) = (false, 0.0);
+        appearing.set_wanted(true, T);
+        let mut leaving = settled_pill("done", "Pasted");
+        leaving.set_wanted(false, T);
+        let long =
+            "Copied because the focused window changed before paste · check the target window";
+        let frames = [
+            ("idle", settled_pill("idle", "Ready"), T),
+            (
+                "starting",
+                settled_pill("starting", "Opening microphone"),
+                T,
+            ),
+            ("recording", recording, T),
+            (
+                "transcribing-0",
+                settled_pill("transcribing", "Transcribing"),
+                1_600_000,
+            ),
+            (
+                "transcribing-270",
+                settled_pill("transcribing", "Transcribing"),
+                2_800_000,
+            ),
+            ("done", settled_pill("done", "Pasted · 2 words filtered"), T),
+            ("done-long", settled_pill("done", long), T),
+            ("error", settled_pill("error", error), T),
+            ("mid-morph", growing, T + 90_000),
+            ("mid-appear", appearing, T + FADE_IN_US / 5),
+            ("mid-leave", leaving, T + FADE_OUT_US / 3),
+        ];
+        for (name, mut pill, now) in frames {
+            for (shade, background) in [("dark", 0.118), ("light", 0.95)] {
+                let mut surface = render(&mut pill, now, Some(background));
+                let stride = surface.stride() as usize;
+                let bytes = glib::Bytes::from(&*surface.data().unwrap());
+                // cairo ARGB32 is native-endian, so BGRA bytes on little-endian hosts.
+                gdk::MemoryTexture::new(
+                    340,
+                    72,
+                    gdk::MemoryFormat::B8g8r8a8Premultiplied,
+                    &bytes,
+                    stride,
+                )
+                .save_to_png(directory.join(format!("{name}-{shade}.png")))
+                .unwrap();
+            }
+        }
     }
 
     #[test]
