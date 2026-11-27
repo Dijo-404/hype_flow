@@ -222,6 +222,12 @@ fn settings_pages_save_validation_compact_layout_and_layer_surface() {
     overlay.update("recording", "Listening", true, 0.6, 3.1);
     assert_eq!(overlay.window.tooltip_text().as_deref(), Some("unchanged"));
     overlay.update("idle", "Ready", false, 0.0, 0.0);
+    // Showing again during the fade-out cancels the deferred hide.
+    overlay.update("recording", "Listening", true, 0.5, 3.2);
+    settle();
+    assert!(overlay.window.is_visible());
+    overlay.update("idle", "Ready", false, 0.0, 0.0);
+    settle();
     assert!(!overlay.window.is_visible());
     overlay.window.close();
     home.window.destroy();
