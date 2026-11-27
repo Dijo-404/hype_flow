@@ -316,12 +316,12 @@ fn worker_flags_use_private_vocabulary_and_remove_it_on_stop() {
         r#"
 assert sys.argv[2] == '3'
 args = sys.argv[3:]
-assert args[:11] == ['--warmup', '--blank-penalty', '0', '--max-active-paths', '4', '--vad-threshold', '0.3', '--vad-min-silence', '0.45', '--max-piece-seconds', '15']
-assert args[11] == '--hotwords'
-hotwords = pathlib.Path(args[12])
+assert args[:12] == ['--warmup', '--normalize-gain', '--blank-penalty', '0', '--max-active-paths', '4', '--vad-threshold', '0.3', '--vad-min-silence', '0.45', '--max-piece-seconds', '15']
+assert args[12] == '--hotwords'
+hotwords = pathlib.Path(args[13])
 assert hotwords.read_text() == 'Niri\nniri'
 assert hotwords.stat().st_mode & 0o777 == 0o600
-assert args[13:] == ['1.8', '--vad', str(root / 'silero_vad.onnx'),
+assert args[14:] == ['1.8', '--vad', str(root / 'silero_vad.onnx'),
                         '--denoise', str(root / 'gtcrn_simple.onnx')]
 event(str(hotwords))
 send({'ready': True})
