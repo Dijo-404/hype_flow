@@ -52,6 +52,7 @@
 #hype-settings button.traffic label {
   color: transparent;
   transition: color 120ms ease-out;
+  margin: -1px 0; /* the 9px glyph's 13px line box would make the light 14x15 */
 }
 #hype-settings button.traffic:hover label {
   color: rgba(0, 0, 0, 0.6);
@@ -201,7 +202,7 @@
 #hype-settings .setting-row > dropdown {
   min-width: 184px;
 }
-#hype-settings scrolledwindow undershoot.top {
+#hype-settings stack > scrolledwindow > undershoot.top {
   border-top: 1px solid @hf_separator;
 }
 #hype-settings .panel-body > entry {
@@ -276,7 +277,8 @@
   box-shadow: none;
 }
 #hype-settings button:disabled label,
-#hype-settings button.primary:disabled label {
+#hype-settings button.primary:disabled label,
+#hype-settings popover modelbutton:disabled label {
   color: alpha(white, 0.3);
 }
 #hype-settings button.primary.saved {
@@ -437,6 +439,14 @@ tooltip label {
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   padding: 4px;
+}
+/* The emoji chooser's grid is a .view: without this it keeps the theme's base colour. */
+#hype-settings popover .view {
+  background: transparent;
+}
+#hype-settings popover > arrow {
+  background: #2c2c2e;
+  border: 1px solid alpha(white, 0.1);
 }
 #hype-settings popover listview {
   background: transparent;
